@@ -6,6 +6,8 @@ Usage:
     python3 ${CLAUDE_SKILL_DIR}/scripts/validate_eval.py memory [eval.md]
 """
 
+import agent_eval._bootstrap  # noqa: F401 — auto-activate venv
+
 import hashlib
 import sys
 from pathlib import Path

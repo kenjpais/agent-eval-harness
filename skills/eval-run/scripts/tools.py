@@ -11,6 +11,8 @@ Supports:
 - Filtering Bash commands by content patterns
 """
 
+import agent_eval._bootstrap  # noqa: F401 — auto-activate venv
+
 import json
 import os
 import re

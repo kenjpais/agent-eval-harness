@@ -23,30 +23,32 @@ Parse `$ARGUMENTS` for:
 
 ## Step 1: Install Dependencies (if needed)
 
-Dependencies are normally auto-installed by the plugin's SessionStart hook. This step is a fallback for mid-session installs or troubleshooting.
+Dependencies are managed in an isolated venv at `<plugin_root>/.eval-venv/`. The SessionStart hook creates this venv automatically. Scripts auto-activate it via `agent_eval._bootstrap` on import.
 
-Check what's missing:
+This step is a fallback for mid-session installs or troubleshooting. Re-run the hook's install script:
 
 ```bash
-python3 -c "import yaml; print('pyyaml: OK')" 2>&1 || echo "pyyaml: MISSING"
+python3 ${CLAUDE_SKILL_DIR}/../../scripts/ensure_deps.py "${CLAUDE_PLUGIN_DATA:-/tmp/agent-eval-data}"
 ```
 
-Install pyyaml if missing:
+To check the venv status:
 
 ```bash
-pip install 'pyyaml>=6.0'
+VENV_PYTHON="${CLAUDE_SKILL_DIR}/../../.eval-venv/bin/python3"
+test -x "$VENV_PYTHON" && echo "venv: OK" || echo "venv: MISSING"
+$VENV_PYTHON -c "import yaml; print('pyyaml: OK')" 2>&1 || echo "pyyaml: MISSING"
 ```
 
-If `--skip-mlflow` was NOT passed, also install mlflow:
+To install additional packages manually into the venv:
 
 ```bash
-pip install 'mlflow[genai]>=3.5'
-```
-
-For LLM judges, pairwise comparison, and LLM-based AskUserQuestion answering in hooks:
-
-```bash
-pip install 'anthropic[vertex]>=0.40'
+VENV_DIR="${CLAUDE_SKILL_DIR}/../../.eval-venv"
+# Use uv if available, otherwise venv pip
+if command -v uv &>/dev/null; then
+  uv pip install --python "$VENV_DIR/bin/python3" 'mlflow[genai]>=3.5' 'anthropic[vertex]>=0.40'
+else
+  "$VENV_DIR/bin/pip" install 'mlflow[genai]>=3.5' 'anthropic[vertex]>=0.40'
+fi
 ```
 
 ## Step 2: Run Preflight Checks

@@ -8,6 +8,8 @@ Usage:
     python3 ${CLAUDE_SKILL_DIR}/scripts/find_skills.py [--name <skill>]
 """
 
+import agent_eval._bootstrap  # noqa: F401 — auto-activate venv
+
 import argparse
 import json
 import sys
