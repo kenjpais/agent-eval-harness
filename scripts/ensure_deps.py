@@ -78,6 +78,11 @@ def _resolve_deps(plugin_root):
             if j.get("prompt") or j.get("prompt_file") or j.get("pairwise"):
                 deps.append(("anthropic[vertex]>=0.40", "anthropic"))
                 break
+    elif isinstance(judges, dict):
+        # _parse_yaml_minimal can't parse YAML lists, so judges may be
+        # a dict or empty. Install anthropic as a safe default since we
+        # can't tell whether LLM judges are configured.
+        deps.append(("anthropic[vertex]>=0.40", "anthropic"))
 
     return deps
 
