@@ -1,0 +1,22 @@
+{
+  "name": "agent-eval-harness-dev",
+  "owner": {
+    "name": "opendatahub-io"
+  },
+  "metadata": {
+    "description": "Local development marketplace for the agent-eval-harness plugin."
+  },
+  "plugins": [
+    {
+      "name": "agent-eval-harness",
+      "version": "0.1.0",
+      "description": "Agent and skill evaluation harness with MLflow integration",
+      "author": {
+        "name": "opendatahub-io"
+      },
+      "source": "./",
+      "homepage": "https://github.com/opendatahub-io/agent-eval-harness",
+      "repository": "https://github.com/opendatahub-io/agent-eval-harness"
+    }
+  ]
+}
