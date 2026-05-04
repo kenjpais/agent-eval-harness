@@ -24,6 +24,16 @@ HARNESS_SKILLS = {"eval-setup", "eval-analyze", "eval-dataset", "eval-run",
                    "eval-review", "eval-mlflow", "eval-optimize"}
 
 
+def _resolve_under_cwd(raw, base):
+    """Resolve a path relative to base, rejecting traversal outside CWD."""
+    candidate = (base / Path(raw)).resolve()
+    try:
+        candidate.relative_to(Path.cwd().resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
 def _skills_from_plugin_json(plugin_json):
     """Extract skill directories from a plugin.json file.
 
@@ -36,11 +46,19 @@ def _skills_from_plugin_json(plugin_json):
         if skills_field:
             plugin_root = plugin_json.parent.parent
             if isinstance(skills_field, str):
-                return [str(plugin_root / skills_field.lstrip("./"))]
+                p = _resolve_under_cwd(skills_field, plugin_root)
+                return [str(p)] if p else None
             elif isinstance(skills_field, list):
-                return [str(plugin_root / s.lstrip("./")) for s in skills_field]
-    except Exception:
-        pass
+                result = []
+                for s in skills_field:
+                    if not isinstance(s, str):
+                        continue
+                    p = _resolve_under_cwd(s, plugin_root)
+                    if p:
+                        result.append(str(p))
+                return result or None
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"WARNING: failed to read {plugin_json}: {e}", file=sys.stderr)
     return None
 
 
@@ -53,7 +71,8 @@ def _discover_via_marketplace():
     try:
         with open(marketplace) as f:
             data = json.load(f)
-    except Exception:
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"WARNING: failed to read {marketplace}: {e}", file=sys.stderr)
         return []
 
     dirs = []
@@ -61,7 +80,9 @@ def _discover_via_marketplace():
         source = plugin.get("source", "")
         if not source:
             continue
-        source_path = Path(source.lstrip("./"))
+        source_path = _resolve_under_cwd(source, Path.cwd())
+        if not source_path:
+            continue
         nested_pj = source_path / ".claude-plugin" / "plugin.json"
         if nested_pj.exists():
             from_pj = _skills_from_plugin_json(nested_pj)
@@ -85,10 +106,12 @@ def get_skill_dirs():
     """
     plugin_json = Path(".claude-plugin/plugin.json")
     from_root = _skills_from_plugin_json(plugin_json) if plugin_json.exists() else None
+    from_root = [d for d in (from_root or []) if Path(d).is_dir()]
     if from_root:
         return from_root
 
     from_marketplace = _discover_via_marketplace()
+    from_marketplace = [d for d in from_marketplace if Path(d).is_dir()]
     if from_marketplace:
         return from_marketplace
 
