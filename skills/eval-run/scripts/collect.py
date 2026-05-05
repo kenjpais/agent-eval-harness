@@ -219,7 +219,10 @@ def _collect_modified_files(case_dir, config):
     if not git_dir.exists():
         return []
 
-    output_dirs = {o.path for o in config.outputs if o.path}
+    output_prefixes = {
+        tuple(Path(o.path).parts)
+        for o in config.outputs if o.path
+    }
 
     try:
         # Modified tracked files
@@ -253,12 +256,16 @@ def _collect_modified_files(case_dir, config):
             continue
         if parts[0] in _HARNESS_PATHS:
             continue
-        if parts[0] in output_dirs:
+        if any(parts[:len(op)] == op for op in output_prefixes):
             continue
-        abs_path = (case_dir / rel).resolve()
+        candidate = case_dir / rel
+        if candidate.is_symlink() or any(p.is_symlink() for p in candidate.parents
+                                         if p != case_dir):
+            continue
+        abs_path = candidate.resolve()
         if not abs_path.is_relative_to(case_dir.resolve()):
             continue
-        if abs_path.is_file() and not abs_path.is_symlink():
+        if abs_path.is_file():
             result.append((rel, abs_path))
 
     return result
