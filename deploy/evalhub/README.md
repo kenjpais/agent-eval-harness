@@ -5,7 +5,7 @@ Custom EvalHub provider for evaluating AI coding agent skills on Red Hat OpenShi
 ## Build
 
 ```bash
-docker build --platform linux/amd64 -f provider/Containerfile -t quay.io/rhoai/agent-eval-provider:latest .
+docker build --platform linux/amd64 -f deploy/evalhub/Containerfile -t quay.io/rhoai/agent-eval-provider:latest .
 ```
 
 ## Push to Internal Registry
@@ -42,7 +42,7 @@ metadata:
     opendatahub.io/managed: "true"
 data:
   provider.yaml: |
-    $(cat provider/provider.yaml | sed 's/^/    /')
+    $(cat deploy/evalhub/provider.yaml | sed 's/^/    /')
 EOF
 ```
 

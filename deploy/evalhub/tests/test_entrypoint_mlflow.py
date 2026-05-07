@@ -19,8 +19,8 @@ from agent_eval.evalhub.stubs import JobResults, EvaluationResult
 
 
 def _load_entrypoint():
-    """Load provider/entrypoint.py as a module without requiring it to be a package."""
-    ep_path = Path(__file__).parent.parent / "provider" / "entrypoint.py"
+    """Load entrypoint.py as a module without requiring it to be a package."""
+    ep_path = Path(__file__).parent / ".." / "entrypoint.py"
     spec = importlib.util.spec_from_file_location("entrypoint", ep_path)
     mod = importlib.util.module_from_spec(spec)
     return mod, spec

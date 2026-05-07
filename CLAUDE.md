@@ -139,7 +139,7 @@ agent skill evaluations on Red Hat OpenShift AI. The adapter:
 - Downloads test cases from S3 via `s3_dataset.py`
 - Translates `eval.yaml` to EvalHub provider definitions via `config_translator.py`
 - Maps `RunResult` + judge scores to `JobResults` via `results_mapper.py`
-- Ships as a UBI9 container image (`provider/Containerfile`)
+- Ships as a UBI9 container image (`deploy/evalhub/Containerfile`)
 
 ### Local skills (unchanged)
 eval-analyze, eval-dataset, eval-optimize, eval-review — authoring workflows

@@ -4,6 +4,6 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir ".[evalhub]" anthropic[vertex]
 COPY agent_eval/ agent_eval/
 COPY skills/eval-run/scripts/ skills/eval-run/scripts/
-COPY provider/entrypoint.py .
-COPY provider/rfe-assess/ /app/eval-config/
+COPY deploy/evalhub/entrypoint.py .
+COPY deploy/evalhub/rfe-assess/ /app/eval-config/
 ENTRYPOINT ["python3", "entrypoint.py"]

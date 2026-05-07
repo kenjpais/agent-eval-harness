@@ -3,7 +3,7 @@
 # Submit with: evalhub eval run --config examples/evalhub-job.yaml
 #
 # Prerequisites:
-#   1. Provider registered via ConfigMap (see provider/configmap-template.yaml)
+#   1. Provider registered via ConfigMap (see deploy/evalhub/configmap-template.yaml)
 #   2. Provider listed in EvalHub CR spec.providers[]
 #   3. Test cases available (baked into container or in S3)
 

@@ -169,7 +169,7 @@ Reviewed against [opendatahub-io/architecture-context eval-hub.md](https://githu
 | MLflow via projected SA token | ✅ | Sidecar handles auth; adapter logs via `callbacks.mlflow.save()` |
 | UBI9 base image | ✅ | `registry.access.redhat.com/ubi9/python-311:latest` |
 | Non-root execution | ✅ | UBI9 python image runs as non-root by default |
-| Provider registered via ConfigMap | ✅ | `provider/configmap-template.yaml` with TrustyAI labels |
+| Provider registered via ConfigMap | ✅ | `deploy/evalhub/configmap-template.yaml` with TrustyAI labels |
 | S3 dataset download | ✅ | `s3_dataset.py` with path traversal protection |
 
 ### Gaps / Workarounds
