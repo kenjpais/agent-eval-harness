@@ -1,9 +1,0 @@
-name: rfe-assess-2048
-model:
-  url: "vertex-ai"
-  name: "claude-sonnet-4-6"
-benchmarks:
-  - provider_id: agent-eval
-    id: skill-eval
-experiment:
-  name: rfe-assess-2048
