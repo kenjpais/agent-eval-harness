@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "EVALHUB",
-  "project_id": "0b33301b-b5e7-45a1-8d0e-4e60610c399d"
-}
