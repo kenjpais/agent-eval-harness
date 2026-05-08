@@ -46,8 +46,8 @@
 
 ### Implementation for User Story 1
 
-- [ ] T006 [US1] Modify `skills/eval-run/scripts/collect.py` to call `parse_stream_events()` on `stdout.log` and write `events.json` per case (gated by `traces.events` config)
-- [ ] T007 [US1] Modify `load_case_record()` in `skills/eval-run/scripts/score.py` to load `events.json` into `record["events"]` and remove `record["stdout"]` loading
+- [ ] T006 [US1] Modify `skills/eval-run/scripts/collect.py` to call `parse_stream_events()` on `stdout.log` and write `events.json` per case using atomic writes (temp file + rename), gated by `traces.events` config
+- [ ] T007 [US1] Modify `load_case_record()` in `skills/eval-run/scripts/score.py` to load `events.json` into `record["events"]` (with schema validation: fall back to `[]` with stderr warning if missing or malformed) and remove `record["stdout"]` loading
 - [ ] T008 [US1] Replace `_extract_tool_calls()` in `skills/eval-run/scripts/score.py` with a lookup over `record["events"]` (filter for tool_use blocks in assistant events)
 - [ ] T009 [US1] Remove `_extract_assistant_text()` from `skills/eval-run/scripts/score.py` (will be replaced by `{{ conversation }}` in US2)
 
@@ -120,9 +120,12 @@
 
 - [ ] T020 [P] Unit test for empty/missing stdout.log in `tests/test_events.py`: verify `parse_stream_events("")` returns `[]`
 - [ ] T021 [P] Unit test for non-JSONL content in `tests/test_events.py`: verify plain text lines are skipped, returns `[]`
-- [ ] T022 [P] Unit test for tool result exceeding 50K cap in `tests/test_events.py`: verify content truncated with `"[truncated]"` marker
+- [ ] T022 [P] Unit test for tool result exceeding 50K cap in `tests/test_events.py`: verify content truncated with `"[truncated]"` marker, `truncated: true` and `original_length` metadata present
 - [ ] T023 [P] Unit test for `traces.events: false` in `tests/test_events.py`: verify no `events.json` written, `record["events"]` is `[]`
 - [ ] T024 [P] Unit test for subagent deduplication in `tests/test_events.py`: verify events streamed in stdout and also in transcript are not double-counted
+- [ ] T025 [P] Unit test for non-UTF-8 tool result content in `tests/test_events.py`: verify binary content replaced with `"(binary content, N bytes)"` placeholder
+- [ ] T026 [P] Unit test for malformed events.json loading in `tests/test_events.py`: verify `load_case_record()` returns `record["events"] = []` with warning when events.json is corrupt
+- [ ] T027 [P] Benchmark test for parse_stream_events() in `tests/test_events.py`: verify linear scaling with representative JSONL sizes (1KB, 100KB, 1MB)
 
 ---
 
@@ -130,11 +133,11 @@
 
 **Purpose**: Documentation updates and regression check.
 
-- [ ] T025 Run existing test suite (`python3 -m pytest tests/ -v`) to verify no regressions
-- [ ] T026 [P] Update `skills/eval-run/references/data-pipeline.md`: document `record["events"]`, `{{ conversation }}`, subagent event tags, remove `{{ stdout }}` guidance, add events.json to pipeline flow
-- [ ] T027 [P] Update `skills/eval-analyze/references/eval-yaml-template.md`: replace `{{ stdout }}` with `{{ conversation }}` in examples, add `traces.events` and `traces.event_result_cap` documentation
-- [ ] T028 [P] Update `skills/eval-analyze/prompts/analyze-skill.md`: replace `{{ stdout }}` with `{{ conversation }}` in judge generation guidance
-- [ ] T029 Remove `tests/test_stdout_template.py` (functionality migrated to `tests/test_events.py`)
+- [ ] T028 Run existing test suite (`python3 -m pytest tests/ -v`) to verify no regressions
+- [ ] T029 [P] Update `skills/eval-run/references/data-pipeline.md`: document `record["events"]`, `{{ conversation }}`, subagent event tags, remove `{{ stdout }}` guidance, add events.json to pipeline flow
+- [ ] T030 [P] Update `skills/eval-analyze/references/eval-yaml-template.md`: replace `{{ stdout }}` with `{{ conversation }}` in examples, add `traces.events` and `traces.event_result_cap` documentation
+- [ ] T031 [P] Update `skills/eval-analyze/prompts/analyze-skill.md`: replace `{{ stdout }}` with `{{ conversation }}` in judge generation guidance
+- [ ] T032 Remove `tests/test_stdout_template.py` (functionality migrated to `tests/test_events.py`)
 
 ---
 
@@ -192,13 +195,13 @@
 
 ## Notes
 
-- Total tasks: 29
+- Total tasks: 32
 - Foundational: 3 tasks
 - US1: 6 tasks (core feature)
 - US2: 4 tasks (template variable)
 - US3: 1 task (verification only)
 - US4: 5 tasks (subagent events)
-- Edge Cases: 5 tasks
+- Edge Cases: 8 tasks (including encoding, schema validation, benchmark)
 - Polish: 5 tasks
 - Primary files: `agent_eval/events.py` (new), `collect.py` (modify), `score.py` (modify), `config.py` (modify)
 - Test file: `tests/test_events.py` (new, replaces `tests/test_stdout_template.py`)

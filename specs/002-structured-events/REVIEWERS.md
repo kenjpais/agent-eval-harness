@@ -30,7 +30,7 @@ For LLM judges, a new `{{ conversation }}` template variable renders root-level 
 
 3. **Flat event list with subagent tags**: All events (root + subagent) in one chronological list, subagent events tagged with `parent_tool_use_id` and `agent_id`. Matches Claude Code's native streaming format (>= 2.1.108). (Alternatives rejected: nesting forces recursion for simple queries; separate lists by agent loses chronological ordering.)
 
-4. **Tool results included with size cap**: 50K chars default (configurable via `traces.event_result_cap`). Judges can see what tools returned without falling back to raw JSONL.
+4. **Tool results included with size cap**: 50K chars default (configurable via `traces.event_result_cap`). Truncated results include `truncated: true` and `original_length` metadata so judges can detect truncation. Non-UTF-8 content gets a binary placeholder.
 
 5. **`{{ conversation }}` naming**: Describes what it renders (root-level assistant conversation text). Distinct from `{{ events }}` (full event list) and `{{ transcript }}` (could confuse with subagent transcripts).
 
@@ -46,7 +46,9 @@ For LLM judges, a new `{{ conversation }}` template variable renders root-level 
 
 - **`traces.events` defaulting to `true`**: Old eval runs without `events.json` will have `record["events"]` as an empty list when re-scored. Judges should handle this gracefully.
 
-- **Subagent deduplication edge cases**: Claude Code >= 2.1.108 streams foreground subagent messages in stdout, but background agents only appear in transcript files. The deduplication must handle both cases correctly.
+- **Subagent deduplication edge cases**: Claude Code >= 2.1.108 streams foreground subagent messages in stdout, but background agents only appear in transcript files. Both get `parent_tool_use_id` and `agent_id` tags. The distinction is transparent to judges, but deduplication must handle both cases correctly.
+
+- **Atomic writes and schema validation**: `events.json` is written atomically (temp + rename) to prevent corruption from crashes. On load, malformed files fall back to `[]` with a warning rather than crashing the scorer.
 
 ## Scope Boundaries
 
@@ -85,6 +87,10 @@ For LLM judges, a new `{{ conversation }}` template variable renders root-level 
 - [ ] Edge cases (empty stdout, non-JSONL, subagent filtering, deduplication) are tested
 - [ ] Subagent events correctly tagged with `parent_tool_use_id` and `agent_id`
 - [ ] `{{ conversation }}` renders root-only text (no subagent text)
+- [ ] Atomic writes for events.json (temp + rename)
+- [ ] Schema validation on events.json load (malformed -> [] with warning)
+- [ ] Non-UTF-8 tool results handled (binary placeholder, no crash)
+- [ ] Truncation metadata (`truncated`, `original_length`) present on capped results
 
 ---
 

@@ -89,20 +89,23 @@ A judge author writes a check judge that evaluates how a skill delegates work to
 - What happens when `traces.events` is set to `false`? No `events.json` is written, `record["events"]` is not populated. Judges that depend on events will receive an empty list or missing key.
 - What happens when `stdout.log` contains subagent messages (with `parent_tool_use_id`)? They are included in the event list with `parent_tool_use_id` and `agent_id` tags. Judges filter to root-only with `if not e.get("parent_tool_use_id")`.
 - What happens when subagent transcript files exist but their events overlap with streamed stdout events? Events are deduplicated by message ID to prevent double-counting.
+- What happens when `events.json` is corrupted (partial write, invalid JSON)? `load_case_record()` sets `record["events"]` to `[]` and logs a warning. Judges receive an empty list rather than crashing.
+- What happens when tool result content contains non-UTF-8 bytes? The content is replaced with a `"(binary content, N bytes)"` placeholder. No crash, no encoding errors.
+- What is the difference between foreground and background subagents? Foreground subagents (Claude Code >= 2.1.108) are streamed in stdout with `parent_tool_use_id`. Background subagents only appear in `subagents/*.jsonl` transcript files. Both types get `parent_tool_use_id` and `agent_id` tags in the event list. The distinction is transparent to judges.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: The system MUST provide a shared parsing function that converts JSONL stdout into a list of structured event objects
-- **FR-002**: The system MUST parse events at collection time and persist them as `events.json` per case in the run output directory
-- **FR-003**: The scoring system MUST load `events.json` into `record["events"]` when building the case record
+- **FR-002**: The system MUST parse events at collection time and persist them as `events.json` per case in the run output directory using atomic writes (write to temp file, then rename)
+- **FR-003**: The scoring system MUST load `events.json` into `record["events"]` when building the case record. If `events.json` is missing or malformed, `record["events"]` MUST be set to `[]` and a warning logged to stderr
 - **FR-004**: The system MUST remove `record["stdout"]` from the case record. Accessing `outputs["stdout"]` in a judge MUST raise a KeyError. Judges access execution data exclusively through `record["events"]`
 - **FR-005**: The system MUST provide a `{{ conversation }}` template variable for LLM judge prompts that renders assistant conversation text from the structured events
 - **FR-006**: The `{{ stdout }}` template variable MUST raise an error with a migration message when used, guiding authors to use `{{ conversation }}`
 - **FR-007**: Each structured event MUST include: event type, content (text or tool data), and timestamp when available
 - **FR-008**: Tool call events MUST include the tool name and input parameters
-- **FR-009**: Tool result events MUST include the result content, capped at 50K characters by default (configurable via `traces.event_result_cap` in eval.yaml) with a `"[truncated]"` marker for oversized results
+- **FR-009**: Tool result events MUST include the result content as valid UTF-8 text, capped at 50K characters by default (configurable via `traces.event_result_cap` in eval.yaml) with a `"[truncated]"` marker for oversized results. Non-UTF-8 content MUST be replaced with a `"(binary content, N bytes)"` placeholder. Truncated results MUST include `"truncated": true` and `"original_length": N` metadata fields
 - **FR-010**: Subagent events MUST be included in the flat event list with `parent_tool_use_id` and `agent_id` tags. The `{{ conversation }}` template variable MUST render only root-level assistant text (no `parent_tool_use_id`)
 - **FR-015**: The parser MUST merge subagent transcript files (`subagents/*.jsonl`) into the event list with proper `agent_id` tagging
 - **FR-016**: Events from subagent transcripts that were already streamed in stdout (Claude Code >= 2.1.108) MUST be deduplicated by message ID
@@ -124,7 +127,7 @@ A judge author writes a check judge that evaluates how a skill delegates work to
 - **SC-002**: JSONL parsing occurs exactly once per case (at collection time), not at scoring time
 - **SC-003**: Existing check judges that used `outputs["tool_calls"]` continue to work (tool calls derived from events)
 - **SC-004**: LLM judges using `{{ conversation }}` receive assistant conversation text identical to what `{{ stdout }}` previously rendered
-- **SC-005**: Collection time overhead for event parsing adds no more than 500ms per case
+- **SC-005**: Event parsing overhead scales linearly with stdout size, verified by benchmark test against representative JSONL sizes (1KB, 100KB, 1MB)
 - **SC-006**: Using `{{ stdout }}` in a judge prompt produces a clear error message with migration instructions
 
 ## Assumptions

@@ -40,7 +40,9 @@ Each event is a dict with a `type` discriminator and type-specific fields:
 }
 ```
 
-- `content`: The tool's output, capped at 50K chars (default). If truncated, ends with `"[truncated]"`.
+- `content`: The tool's output as valid UTF-8 text, capped at 50K chars (default). If truncated, ends with `"[truncated]"`. Non-UTF-8 content replaced with `"(binary content, N bytes)"`.
+- `truncated` (optional): `true` when content was capped. Absent when not truncated.
+- `original_length` (optional): Original character count before truncation. Present only when `truncated` is `true`.
 - `tool_name`: Resolved by matching `tool_use_id` back to the preceding assistant event's tool call. Empty string if unresolvable.
 - `is_error`: True if the tool call failed.
 
