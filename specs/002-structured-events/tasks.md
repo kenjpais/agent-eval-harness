@@ -26,10 +26,10 @@
 **Purpose**: Create the shared event parser that all user stories depend on.
 
 - [X] T001 Create `agent_eval/events.py` with `parse_stream_events(stdout_text, result_cap=50000)` function that parses JSONL into structured event dicts per the data model schema (includes subagent events with `parent_tool_use_id` and `agent_id` tags)
-- [ ] T001a Cap string values in tool inputs at `event_result_cap` in `_parse_assistant_event()` in `agent_eval/events.py`, with same truncation metadata (`truncated: true`, `original_length: N`) as tool results (FR-008)
+- [X] T001a Cap string values in tool inputs at `event_result_cap` in `_parse_assistant_event()` in `agent_eval/events.py`, with same truncation metadata (`truncated: true`, `original_length: N`) as tool results (FR-008)
 - [X] T002 [P] Add `event_result_cap` field to `TracesConfig` in `agent_eval/config.py` (default: 50000) and update `traces.events` default to `true`
 - [X] T003 [P] Unit tests for `parse_stream_events()` in `tests/test_events.py`: valid JSONL with assistant text, tool calls, tool results, system/result events, timestamps, subagent events with tags
-- [ ] T003a [P] Unit test for tool input capping in `tests/test_events.py`: verify large string values in tool inputs are truncated at `event_result_cap` with `truncated` and `original_length` metadata
+- [X] T003a [P] Unit test for tool input capping in `tests/test_events.py`: verify large string values in tool inputs are truncated at `event_result_cap` with `truncated` and `original_length` metadata
 
 **Checkpoint**: Shared parser exists, is tested, and can convert JSONL stdout into structured events including subagent events. Tool inputs capped at `event_result_cap`.
 
