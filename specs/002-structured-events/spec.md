@@ -96,7 +96,7 @@ A judge author writes a check judge that evaluates how a skill delegates work to
 - What happens when `events.json` is corrupted (partial write, invalid JSON)? `load_case_record()` sets `record["events"]` to `[]` and logs a warning. Judges receive an empty list rather than crashing.
 - What happens when tool result content contains non-UTF-8 bytes? The content is replaced with a `"(binary content, N bytes)"` placeholder. No crash, no encoding errors.
 - What is the difference between foreground and background subagents? Foreground subagents (Claude Code >= 2.1.108) are streamed in stdout with `parent_tool_use_id`. Background subagents only appear in `subagents/*.jsonl` transcript files. Both types get `parent_tool_use_id` and `agent_id` tags in the event list. The distinction is transparent to judges.
-- What happens in batch mode (`execution.mode: batch`)? No `events.json` is produced. Structured events require case mode where each case has its own `stdout.log`. Judges in batch mode do not receive `outputs["events"]` (empty list).
+- What happens in batch mode (`execution.mode: batch`)? No `events.json` is produced. `record["events"]` MUST be set to `[]` (same contract as `traces.events: false`). Structured events require case mode where each case has its own `stdout.log`.
 
 ## Requirements *(mandatory)*
 
@@ -113,7 +113,7 @@ A judge author writes a check judge that evaluates how a skill delegates work to
 - **FR-010**: Subagent events MUST be included in the flat event list with `parent_tool_use_id` and `agent_id` tags. The `{{ conversation }}` template variable MUST render only root-level assistant text (no `parent_tool_use_id`)
 - **FR-015**: The parser MUST merge subagent transcript files (`subagents/*.jsonl`) into the event list with proper `agent_id` tagging
 - **FR-016**: Events from subagent transcripts that were already streamed in stdout (Claude Code >= 2.1.108) MUST be deduplicated by message ID
-- **FR-011**: The `traces.events` configuration flag MUST control whether event parsing occurs at collection time. In batch mode (`execution.mode: batch`), event parsing is skipped and no `events.json` is produced
+- **FR-011**: The `traces.events` configuration flag MUST control whether event parsing occurs at collection time. When `execution.mode: batch`, event parsing MUST be skipped regardless of `traces.events` flag value (batch mode takes precedence). In both cases (batch mode or `traces.events: false`), no `events.json` is produced and `record["events"]` MUST be set to `[]`
 - **FR-012**: The `traces.stdout` configuration flag MUST continue to control whether raw `stdout.log` is retained on disk for human debugging
 - **FR-013**: The existing `_extract_tool_calls()` function MUST be replaced by a lookup over `record["events"]`
 - **FR-014**: The existing `_extract_assistant_text()` function MUST be replaced by a lookup over `record["events"]`
@@ -128,7 +128,7 @@ A judge author writes a check judge that evaluates how a skill delegates work to
 ### Measurable Outcomes
 
 - **SC-001**: Judges can access structured events via `outputs["events"]` without writing any JSONL parsing code
-- **SC-002**: JSONL parsing occurs exactly once per case (at collection time), not at scoring time
+- **SC-002**: When `traces.events` is enabled and `execution.mode: case`, JSONL parsing occurs exactly once per case (at collection time), never at scoring time
 - **SC-003**: Existing check judges that used `outputs["tool_calls"]` continue to work (tool calls derived from events)
 - **SC-004**: LLM judges using `{{ conversation }}` receive assistant conversation text from the structured events
 - **SC-005**: Event parsing overhead scales linearly with stdout size, verified by benchmark test against representative JSONL sizes (1KB, 100KB, 1MB)
