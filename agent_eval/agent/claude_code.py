@@ -50,7 +50,7 @@ class ClaudeCodeRunner(EvalRunner):
             subagent_model=overrides.get("subagent_model"),
             mlflow_experiment=overrides.get("mlflow_experiment"),
             mlflow_tracking_uri=overrides.get("mlflow_tracking_uri"),
-            effort=overrides.get("effort"),
+            effort=overrides.get("effort", config.runner.effort),
             log_prefix=log_prefix,
         )
 

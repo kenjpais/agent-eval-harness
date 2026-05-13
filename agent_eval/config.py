@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import yaml
 
@@ -120,7 +120,7 @@ class RunnerConfig:
     that don't read them.
     """
     type: str = "claude-code"
-    command: object = None  # CLI runner: command template (str or list)
+    command: Optional[Union[str, list]] = None  # CLI runner: command template
     settings: dict = field(default_factory=dict)
     plugin_dirs: list = field(default_factory=list)
     env_strip: list = field(default_factory=list)
@@ -265,9 +265,16 @@ class EvalConfig:
 
         # Runner config (block form)
         runner_raw = raw.get("runner") or {}
+        command = runner_raw.get("command")
+        if command is not None:
+            valid_list = isinstance(command, list) and all(
+                isinstance(x, str) for x in command)
+            if not (isinstance(command, str) or valid_list):
+                raise ValueError(
+                    "runner.command must be a string or list of strings")
         runner = RunnerConfig(
             type=runner_raw.get("type", "claude-code"),
-            command=runner_raw.get("command"),
+            command=command,
             settings=runner_raw.get("settings", {}) or {},
             plugin_dirs=runner_raw.get("plugin_dirs", []) or [],
             env_strip=runner_raw.get("env_strip", []) or [],

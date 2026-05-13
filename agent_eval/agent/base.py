@@ -33,6 +33,7 @@ class EvalRunner(ABC):
     """Abstract runner -- one implementation per agent platform."""
 
     @classmethod
+    @abstractmethod
     def from_config(cls, config, *, log_prefix=None, **overrides):
         """Construct a runner from an EvalConfig.
 
@@ -44,8 +45,6 @@ class EvalRunner(ABC):
             log_prefix: Progress logging prefix (e.g. "eval", "eval:case-01").
             **overrides: Runner-specific overrides from CLI flags.
         """
-        raise NotImplementedError(
-            f"{cls.__name__} must implement from_config()")
 
     @property
     @abstractmethod

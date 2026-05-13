@@ -74,11 +74,11 @@ class TestCliRunnerInit:
         with pytest.raises(TypeError, match="must be a string or list"):
             CliRunner(command=42)
 
-    def test_ignores_extra_kwargs(self):
+    def test_ignores_extra_kwargs(self, tmp_path):
         runner = CliRunner(
             command="echo hello",
             permissions={"allow": ["*"]},
-            plugin_dirs=["/tmp"],
+            plugin_dirs=[str(tmp_path)],
             subagent_model="sonnet",
         )
         assert runner.name == "cli"
@@ -114,38 +114,38 @@ class TestPlaceholderResolution:
         })
         assert result == "sk /ws /ws/output m 600 5.0 --flag"
 
-    def test_subagent_model_and_effort_placeholders(self):
+    def test_subagent_model_and_effort_placeholders(self, tmp_path):
         runner = CliRunner(
             command="run --model {model} --subagent {subagent_model} --effort {effort}",
             subagent_model="haiku",
             effort="high",
         )
         result = runner.run_skill(
-            skill_name="test", args="", workspace=Path("/tmp"),
+            skill_name="test", args="", workspace=tmp_path,
             model="opus", timeout_s=10,
         )
         # Can't easily check the resolved command, but verify it ran
         # (the command will fail, but that's fine — we care about resolution)
         assert isinstance(result.exit_code, int)
 
-    def test_system_prompt_placeholder(self):
+    def test_system_prompt_placeholder(self, tmp_path):
         runner = CliRunner(
             command=["echo", "{system_prompt}"],
             system_prompt="Be careful",
         )
         result = runner.run_skill(
-            skill_name="test", args="", workspace=Path("/tmp"),
+            skill_name="test", args="", workspace=tmp_path,
             model="m", timeout_s=10,
         )
         assert "Be careful" in result.stdout
 
-    def test_run_skill_system_prompt_overrides_constructor(self):
+    def test_run_skill_system_prompt_overrides_constructor(self, tmp_path):
         runner = CliRunner(
             command=["echo", "{system_prompt}"],
             system_prompt="from constructor",
         )
         result = runner.run_skill(
-            skill_name="test", args="", workspace=Path("/tmp"),
+            skill_name="test", args="", workspace=tmp_path,
             model="m", timeout_s=10,
             system_prompt="from caller",
         )
@@ -170,7 +170,8 @@ class TestCliRunnerExecution:
         assert result.duration_s > 0
 
     def test_failing_command(self, tmp_path):
-        runner = CliRunner(command="exit 42", log_prefix="test")
+        runner = CliRunner(command=["python3", "-c", "import sys; sys.exit(42)"],
+                           log_prefix="test")
         result = runner.run_skill(
             skill_name="test",
             args="",
@@ -273,7 +274,7 @@ class TestCliRunnerExecution:
     def test_extra_env_vars(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MY_SECRET", "s3cret")
         runner = CliRunner(
-            command="echo $MY_VAR $RESOLVED",
+            command=["python3", "-c", "import os; print(os.environ['MY_VAR'], os.environ['RESOLVED'])"],
             env={"MY_VAR": "hello", "RESOLVED": "$MY_SECRET"})
         result = runner.run_skill(
             skill_name="test", args="", workspace=tmp_path, model="m")

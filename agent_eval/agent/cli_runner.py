@@ -43,9 +43,10 @@ class CliRunner(EvalRunner):
         return cls(
             command=config.runner.command,
             env=config.execution.env,
+            env_strip=config.runner.env_strip,
             log_prefix=log_prefix,
             subagent_model=overrides.get("subagent_model"),
-            effort=overrides.get("effort"),
+            effort=overrides.get("effort", config.runner.effort),
             system_prompt=config.runner.system_prompt,
         )
 
@@ -53,6 +54,7 @@ class CliRunner(EvalRunner):
         self,
         command: Union[str, list],
         env: Optional[dict] = None,
+        env_strip: Optional[list] = None,
         log_prefix: Optional[str] = None,
         subagent_model: Optional[str] = None,
         effort: Optional[str] = None,
@@ -68,6 +70,7 @@ class CliRunner(EvalRunner):
                 f"runner.command must be a string or list, got {type(command).__name__}")
         self._command = command
         self._extra_env = env or {}
+        self._env_strip = env_strip or []
         self._log_prefix = log_prefix
         self._subagent_model = subagent_model or ""
         self._effort = effort or ""
@@ -115,15 +118,19 @@ class CliRunner(EvalRunner):
                     for k, v in input_data.items():
                         if k not in placeholders:
                             placeholders[k] = str(v) if v is not None else ""
-            except Exception as exc:
+            except (yaml.YAMLError, OSError, ValueError) as exc:
                 with _print_lock:
                     print(f"  WARNING: failed to parse {input_path}: {exc}",
                           flush=True)
 
         cmd = self._resolve_command(placeholders)
 
+        # Always use list form to avoid shell=True (CWE-78)
+        if isinstance(cmd, str):
+            cmd = shlex.split(cmd)
+
         if self._log_prefix:
-            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+            cmd_str = " ".join(cmd)
             with _print_lock:
                 print(f"  {self._log_prefix} | Running: {cmd_str[:120]}", flush=True)
 
@@ -138,7 +145,6 @@ class CliRunner(EvalRunner):
                 text=True,
                 cwd=str(workspace),
                 env=env,
-                shell=isinstance(cmd, str),
                 start_new_session=True,
             )
             try:
@@ -146,10 +152,11 @@ class CliRunner(EvalRunner):
             except subprocess.TimeoutExpired:
                 # Kill the entire process group so child processes don't linger
                 os.killpg(proc.pid, signal.SIGKILL)
-                stdout, stderr = proc.communicate()
+                try:
+                    stdout, stderr = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    stdout, stderr = "", "Process group termination hung"
                 duration = time.monotonic() - start
-                if isinstance(stdout, bytes):
-                    stdout = stdout.decode(errors="replace")
                 return RunResult(
                     exit_code=-1,
                     stdout=stdout or "",
@@ -157,7 +164,7 @@ class CliRunner(EvalRunner):
                     duration_s=duration,
                 )
             duration = time.monotonic() - start
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             duration = time.monotonic() - start
             return RunResult(
                 exit_code=-1,
@@ -191,14 +198,17 @@ class CliRunner(EvalRunner):
 
     def _resolve_command(self, placeholders: dict):
         """Resolve placeholders in the command template."""
-        is_shell = isinstance(self._command, str)
+        # String commands are shlex.split() after resolution, so quote
+        # placeholder values to preserve tokens with spaces/special chars.
+        # List commands don't need quoting — each element is already a token.
+        needs_quoting = isinstance(self._command, str)
 
         def _sub(template: str) -> str:
             def _replace(m):
                 key = m.group(1)
                 if key in placeholders:
                     value = placeholders[key]
-                    return shlex.quote(value) if is_shell else value
+                    return shlex.quote(value) if needs_quoting else value
                 return m.group(0)  # leave unresolved placeholders as-is
             return re.sub(r'\{([\w-]+)\}', _replace, template)
 
@@ -207,8 +217,10 @@ class CliRunner(EvalRunner):
         return _sub(self._command)
 
     def _build_env(self) -> dict:
-        """Build subprocess environment: inherit full env + extra vars."""
+        """Build subprocess environment: inherit env, apply strip list, add extras."""
         env = os.environ.copy()
+        for key in self._env_strip:
+            env.pop(key, None)
         for k, v in self._extra_env.items():
             if isinstance(v, str) and v.startswith("$"):
                 resolved = os.environ.get(v[1:])
