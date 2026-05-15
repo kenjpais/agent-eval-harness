@@ -260,13 +260,13 @@ def main():
                     duration_s = run_result.get("duration_s", 0)
                     print(f"TRACE: {main_trace_id} ({num_spans} spans, {duration_s:.0f}s)")
 
-    # Flush async queue after building synthetic traces
-    try:
-        from mlflow.tracing.export.async_export_queue import AsyncExportQueue
-        AsyncExportQueue.get_instance().flush(timeout_sec=30)
-    except Exception:
-        pass
-    import time; time.sleep(3)
+    # Flush async queue so traces are committed before linking/feedback.
+    if trace_ids:
+        try:
+            from mlflow.tracing.export.async_export_queue import AsyncExportQueue
+            AsyncExportQueue.get_instance().flush(timeout_sec=30)
+        except Exception as e:
+            print(f"WARNING: trace export flush failed: {e}", file=sys.stderr)
 
     if not main_trace_id and case_trace_map:
         main_trace_id = next(iter(case_trace_map.values()))
@@ -284,6 +284,27 @@ def main():
     # ── Attach judge feedback to traces (populates Quality tab) ──
     feedback_count = 0
     from mlflow.entities.assessment_source import AssessmentSource, AssessmentSourceType
+
+    _TRUE_STRS = {"pass", "true", "yes", "y", "1", "ok", "success"}
+    _FALSE_STRS = {"fail", "false", "no", "n", "0", "error", "failure"}
+
+    def _to_feedback_value(v):
+        if isinstance(v, bool):
+            return 1.0 if v else 0.0
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in _TRUE_STRS:
+                return 1.0
+            if s in _FALSE_STRS:
+                return 0.0
+            try:
+                return float(s)
+            except ValueError:
+                return None
+        return None
+
     for case_id, case_results in per_case.items():
         trace_id = case_trace_map.get(case_id, main_trace_id)
         if not trace_id or not isinstance(case_results, dict):
@@ -294,11 +315,14 @@ def main():
             value = result.get("value")
             if value is None:
                 continue
+            fb_value = _to_feedback_value(value)
+            if fb_value is None:
+                continue
             try:
                 mlflow.log_feedback(
                     trace_id=trace_id,
-                    name=f"{judge_name}",
-                    value=value if isinstance(value, (int, float)) else (1.0 if value else 0.0),
+                    name=judge_name,
+                    value=fb_value,
                     rationale=str(result.get("rationale", ""))[:500],
                     source=AssessmentSource(
                         source_type=AssessmentSourceType.CODE,
