@@ -126,8 +126,84 @@ No decision needed yet. These are future judge patterns that become possible onc
 - Cost/efficiency judges may need access to `outputs["cost_usd"]` alongside events
 - Regression fingerprinting may require a new judge type or extension to the pairwise comparison system
 
+## E: Reusable Judge Library
+
+**Origin:** @astefanutti's feedback on PR #58: "I also wonder how we could start bundling those reusable / generic judges."
+
+The four judge patterns above (A-D) are deliberately skill-agnostic. A "no destructive commands" safety judge works for any skill, not just one. This raises the question of how to package and distribute them.
+
+### Packaging Options
+
+**Option 1: Built-in judge templates in eval.yaml**
+
+Ship judges as named presets that eval.yaml can reference:
+
+```yaml
+judges:
+  - name: safety-no-destructive-commands
+    type: builtin
+  - name: process-read-before-write
+    type: builtin
+  - name: my-custom-judge
+    type: check
+    script: judges/custom.py
+```
+
+The harness resolves `type: builtin` to bundled Python scripts. Simple to use, but couples the judge library to the harness release cycle.
+
+**Option 2: Judge pack directory**
+
+Ship a `judges/` directory in the harness with categorized judge scripts:
+
+```
+agent_eval/judges/
+  safety/
+    no_destructive_commands.py
+    no_path_traversal.py
+  process/
+    read_before_write.py
+    edit_thrashing.py
+  efficiency/
+    error_rate.py
+    cost_per_action.py
+```
+
+eval.yaml references them by path or module name. Judges are just Python files, easy to inspect, copy, and modify. Projects can vendor individual judges into their own eval directory.
+
+**Option 3: Judge presets (curated bundles)**
+
+Group judges into opinionated preset collections:
+
+```yaml
+judges:
+  - preset: safety-baseline    # no destructive commands, no path traversal, no secrets
+  - preset: process-quality    # read-before-write, no edit thrashing, tool selection
+  - name: my-skill-judge       # skill-specific judge alongside presets
+    type: prompt
+    prompt_file: judges/quality.md
+```
+
+Presets expand to multiple judges at config load time. Higher-level than individual judge files, but less flexible.
+
+### Recommended Approach
+
+**Option 2 (judge pack directory)** as the foundation, with **Option 1 (builtin references)** as syntactic sugar on top.
+
+The directory gives transparency and vendoring. The `type: builtin` shorthand makes common judges easy to add without knowing the file path. Presets (Option 3) can layer on later once we have enough judges to form meaningful bundles.
+
+### Discovery and Documentation
+
+Each judge file should include a docstring describing what it checks, what event fields it requires, and what a failure means. A `judges/README.md` or auto-generated index would list available judges with one-line descriptions, so skill authors can browse what's available.
+
+### Composability with Skill-Specific Judges
+
+The library judges should compose cleanly with skill-specific judges in eval.yaml. Ordering matters for reporting but not execution (judges run independently). The report should group library judges separately from skill-specific ones so it's clear which failures are generic guardrails vs. skill quality issues.
+
 ## Open Questions
 
 - Should the framework ship with built-in judge templates for common patterns (e.g., "no destructive commands" as a default safety judge)?
 - How should regression fingerprinting integrate with the existing `thresholds` system?
 - Should process quality metrics (tool call count, error rate) be auto-computed from events and exposed as `record["process_metrics"]`?
+- What's the minimum viable set of judges for a "safety-baseline" preset?
+- Should library judges have their own thresholds defaults, or always require explicit threshold config?
+- How do library judges version? Can a harness upgrade change judge behavior and break existing eval baselines?
