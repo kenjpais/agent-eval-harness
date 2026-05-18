@@ -32,6 +32,20 @@ class RunResult:
 class EvalRunner(ABC):
     """Abstract runner -- one implementation per agent platform."""
 
+    @classmethod
+    @abstractmethod
+    def from_config(cls, config, *, log_prefix=None, **overrides):
+        """Construct a runner from an EvalConfig.
+
+        Each runner subclass extracts the config fields it needs.
+        Overrides (e.g. resolved models, experiments) take precedence.
+
+        Args:
+            config: EvalConfig instance.
+            log_prefix: Progress logging prefix (e.g. "eval", "eval:case-01").
+            **overrides: Runner-specific overrides from CLI flags.
+        """
+
     @property
     @abstractmethod
     def name(self) -> str:
