@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     uses: ./.github/workflows/tests.yml
+    permissions:
+      contents: read
 
   release:
     needs: test
@@ -15,17 +17,23 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
       - name: Install semantic-release
-        run: npm install -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/exec
+        run: >-
+          npm install -g
+          semantic-release@25.0.3
+          @semantic-release/changelog@6.0.3
+          @semantic-release/git@10.0.1
+          @semantic-release/github@12.0.8
+          @semantic-release/exec@7.1.0
 
       - name: Run semantic-release
         env:
