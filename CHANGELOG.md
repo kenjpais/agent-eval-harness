@@ -1,3 +1,10 @@
+## [1.2.3](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.2.2...v1.2.3) (2026-05-29)
+
+
+### Bug Fixes
+
+* **eval-review:** update for v1.2 judge types, exact case matching ([#82](https://github.com/opendatahub-io/agent-eval-harness/issues/82)) ([2f7c0ea](https://github.com/opendatahub-io/agent-eval-harness/commit/2f7c0ea8a47ce83ed3d8baf315a3b376fa4a598c))
+
 ## [1.2.2](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.2.1...v1.2.2) (2026-05-29)
 
 
