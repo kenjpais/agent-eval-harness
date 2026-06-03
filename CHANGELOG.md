@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.5.0...v1.6.0) (2026-06-03)
+
+
+### Features
+
+* add /eval-check for harness-level context and skills scanning / checking ([#74](https://github.com/opendatahub-io/agent-eval-harness/issues/74)) ([de0ca7c](https://github.com/opendatahub-io/agent-eval-harness/commit/de0ca7cf0e7697047bfd8200e9cc8f00995e44ee))
+
 # [1.5.0](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.4.1...v1.5.0) (2026-06-02)
 
 
