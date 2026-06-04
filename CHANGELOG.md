@@ -1,3 +1,10 @@
+## [1.7.2](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.7.1...v1.7.2) (2026-06-04)
+
+
+### Bug Fixes
+
+* **eval-run:** include cache tokens in input token metric ([#107](https://github.com/opendatahub-io/agent-eval-harness/issues/107)) ([4ef40fd](https://github.com/opendatahub-io/agent-eval-harness/commit/4ef40fd705e24e9687bb612ec8a3b7d030cc52fd))
+
 ## [1.7.1](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.7.0...v1.7.1) (2026-06-04)
 
 
