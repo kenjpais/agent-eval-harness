@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.7.0...v1.7.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* **eval-run:** validate baseline run-id exists in preflight check ([#106](https://github.com/opendatahub-io/agent-eval-harness/issues/106)) ([2a8ac0d](https://github.com/opendatahub-io/agent-eval-harness/commit/2a8ac0de10a398132b3c6d51e0edf4f6bd002fc6))
+
 # [1.7.0](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.6.0...v1.7.0) (2026-06-04)
 
 
