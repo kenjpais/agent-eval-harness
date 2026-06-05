@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.8.0...v1.9.0) (2026-06-05)
+
+
+### Features
+
+* add dataset.workspace.files for provisioning case source files ([#70](https://github.com/opendatahub-io/agent-eval-harness/issues/70)) ([f687a3c](https://github.com/opendatahub-io/agent-eval-harness/commit/f687a3ca7792616ae48ed5f62e88c9f31d1dc752))
+
 # [1.8.0](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.7.2...v1.8.0) (2026-06-04)
 
 
