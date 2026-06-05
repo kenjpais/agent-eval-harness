@@ -1,3 +1,10 @@
+## [1.9.1](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.9.0...v1.9.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* skip workspace.files in batch mode to prevent silent overwrites ([#112](https://github.com/opendatahub-io/agent-eval-harness/issues/112)) ([bb7e8bd](https://github.com/opendatahub-io/agent-eval-harness/commit/bb7e8bd48f4638ca536a95dc6e9a68028d4d0e8d)), closes [#111](https://github.com/opendatahub-io/agent-eval-harness/issues/111)
+
 # [1.9.0](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.8.0...v1.9.0) (2026-06-05)
 
 
