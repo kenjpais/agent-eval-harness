@@ -591,6 +591,13 @@ details.case > summary:hover { color: var(--accent); }
 .stab-label { font-size: 0.8em; color: var(--text-muted); }
 .ascii-range { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.85em; letter-spacing: 1px; color: var(--text-muted); margin-left: 6px; white-space: pre; }
 .ascii-range .med { color: var(--accent); font-weight: 700; }
+.sample-tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 0.5em; }
+.sample-tab { padding: 3px 10px; font-size: 0.82em; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; color: var(--text-muted); background: none; }
+.sample-tab:hover { background: var(--surface-2); }
+.sample-tab[aria-selected="true"] { color: var(--text); background: var(--surface); border-color: var(--border); border-bottom: 2px solid var(--surface); margin-bottom: -2px; font-weight: 600; }
+.sample-tab .tab-score { font-weight: 700; margin-right: 4px; }
+.sample-panel { display: none; }
+.sample-panel.active { display: block; }
 .diff-table { width: 100%; border-collapse: collapse; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.82em; table-layout: fixed; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .diff-table td { padding: 1px 6px; vertical-align: top; white-space: pre-wrap; word-wrap: break-word; border: 1px solid var(--border); }
 .diff-table .ln { width: 35px; min-width: 35px; color: var(--text-muted); text-align: right; background: var(--surface-2); user-select: none; white-space: nowrap; }
@@ -768,6 +775,27 @@ IMAGE_COMPARE_SCRIPT = """
         }
       })(onion);
     }
+  });
+})();
+"""
+
+SAMPLE_TABS_SCRIPT = """
+(function () {
+  document.querySelectorAll('.sample-tabs').forEach(function (bar) {
+    bar.querySelectorAll('.sample-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        var group = tab.closest('td');
+        group.querySelectorAll('.sample-tab').forEach(function (t) {
+          t.setAttribute('aria-selected', 'false');
+        });
+        group.querySelectorAll('.sample-panel').forEach(function (p) {
+          p.classList.remove('active');
+        });
+        tab.setAttribute('aria-selected', 'true');
+        var target = group.querySelector('#' + tab.dataset.panel);
+        if (target) target.classList.add('active');
+      });
+    });
   });
 })();
 """
@@ -2014,7 +2042,28 @@ def _render_per_case(summary, run_dir, config, baseline_dir, review):
                 val_html += (f' <span class="ascii-range" '
                              f'title="{npass}/{nsamp} pass">{glyph}</span>')
 
-            rat_html = _md_to_html(_normalize_escapes(rat)) if rat else ""
+            sample_rats = jresult.get("sample_rationales")
+            if sample_rats and len(sample_rats) > 1:
+                tab_id = f"sr-{_esc(case_id)}-{_esc(jname)}"
+                rat_html = '<div class="sample-tabs" role="tablist">'
+                for si, sr in enumerate(sample_rats):
+                    sv = sr.get("value")
+                    sel = "true" if si == 0 else "false"
+                    label = f'<span class="tab-score">{sv}</span>#{si+1}'
+                    if sr.get("error"):
+                        label = f'<span class="tab-score">ERR</span>#{si+1}'
+                    rat_html += (f'<button class="sample-tab" role="tab" '
+                                 f'aria-selected="{sel}" '
+                                 f'data-panel="{tab_id}-{si}">{label}</button>')
+                rat_html += '</div>'
+                for si, sr in enumerate(sample_rats):
+                    active = " active" if si == 0 else ""
+                    sr_rat = sr.get("rationale") or sr.get("error") or ""
+                    sr_html = _md_to_html(_normalize_escapes(str(sr_rat))) if sr_rat else ""
+                    rat_html += (f'<div class="sample-panel{active}" '
+                                 f'id="{tab_id}-{si}" role="tabpanel">{sr_html}</div>')
+            else:
+                rat_html = _md_to_html(_normalize_escapes(rat)) if rat else ""
             html += (f'<tr><td>{_esc(jname)}</td><td>{val_html}</td>'
                      f'<td class="rationale">{rat_html}</td></tr>\n')
 
@@ -2369,6 +2418,7 @@ def generate_report(config, summary, run_result, run_dir,
     html += _render_per_case(summary, run_dir, config, baseline_dir, review)
     html += f"\n<script>{TOGGLE_SCRIPT}</script>\n"
     html += f"<script>{IMAGE_COMPARE_SCRIPT}</script>\n"
+    html += f"<script>{SAMPLE_TABS_SCRIPT}</script>\n"
     html += "</body>\n</html>\n"
     return html
 

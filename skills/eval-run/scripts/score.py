@@ -728,8 +728,14 @@ def _aggregate_samples(runs, judge_type):
         stability = {"samples": len(runs), "error_count": error_count,
                      "values": vals,
                      "stable": all_ok and len({str(v) for v in vals}) <= 1}
-    return {"value": value, "rationale": rationale, "judge_type": judge_type,
-            "stability": stability}
+    result = {"value": value, "rationale": rationale, "judge_type": judge_type,
+              "stability": stability}
+    if not stability.get("stable"):
+        result["sample_rationales"] = [
+            {"value": r.get("value"), "rationale": r.get("rationale", ""),
+             "error": r.get("error")}
+            for r in runs]
+    return result
 
 
 def score_cases(judges, case_dirs, config, run_id=None, samples_override=None):
