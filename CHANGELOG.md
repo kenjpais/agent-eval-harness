@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.11.0...v1.12.0) (2026-06-08)
+
+
+### Features
+
+* tabbed rationale view for non-stable sampled judges ([e23f9c6](https://github.com/opendatahub-io/agent-eval-harness/commit/e23f9c6711ebe908c0d8e987a9ed0b6a6d1fd0eb))
+
 # [1.11.0](https://github.com/opendatahub-io/agent-eval-harness/compare/v1.10.0...v1.11.0) (2026-06-08)
 
 
