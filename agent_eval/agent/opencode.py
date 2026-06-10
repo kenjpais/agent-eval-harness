@@ -83,13 +83,14 @@ class OpenCodeRunner(EvalRunner):
         system_prompt: Optional[str] = None,
         max_budget_usd: float = 5.0,
         timeout_s: int = 600,
+        extra_env: Optional[dict] = None,
         output_dir: Optional[Path] = None,
     ) -> RunResult:
         receiver = None
         otel_port = None
         if self._otel_config and self._otel_config.enabled:
             from agent_eval.otel.receiver import OTLPReceiver
-            otel_output = workspace
+            otel_output = output_dir or workspace
             receiver = OTLPReceiver(output_dir=otel_output)
             otel_port = receiver.start()
 
