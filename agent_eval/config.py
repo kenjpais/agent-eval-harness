@@ -67,7 +67,7 @@ class DatasetConfig:
 
     path: str = ""
     schema: str = ""
-    domain: dict = field(default_factory=dict)  # Repository-specific knowledge
+    domain: Union[str, dict] = field(default_factory=dict)  # Repository-specific knowledge (string for prompt-mode, dict for skill-mode)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
 
 
@@ -206,6 +206,12 @@ class ExecutionConfig:
                 "Use skill for '/skill-name' invocations or prompt for direct prompts."
             )
 
+        if not has_skill and not has_prompt:
+            raise ValueError(
+                "execution requires either 'skill' or 'prompt'. "
+                "Use skill for '/skill-name' invocations or prompt for direct prompts."
+            )
+
 
 @dataclass
 class RunnerConfig:
@@ -275,7 +281,7 @@ class TestCategory:
     Each category references a template that defines how to generate test cases.
     """
     name: str
-    template: str  # Template reference: "builtin:name" or path/to/template.md
+    template: str  # Template reference: "category/name" (e.g., "documentation/navigation") or path/to/template.md
     count: int
     description: str = ""
 
