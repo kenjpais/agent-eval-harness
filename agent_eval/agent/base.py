@@ -1,10 +1,11 @@
 """Abstract runner interface for agent evaluation.
 
-Each runner implementation translates the generic run_skill() call into
+Each runner implementation translates the generic execute() call into
 a platform-specific invocation (Claude Code CLI, Agent SDK, OpenCode, etc.).
 The eval harness only interacts with runners through this interface.
 """
 
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,10 +52,30 @@ class EvalRunner(ABC):
     def name(self) -> str:
         """Short identifier for this runner (e.g. 'claude-code', 'agent-sdk')."""
 
-    @abstractmethod
-    def run_skill(
+    def setup_workspace(
         self,
-        skill_name: str,
+        workspace: Path,
+        config,
+        *,
+        project_root: Optional[Path] = None,
+        interceptor_src: Optional[Path] = None,
+    ) -> None:
+        """Configure workspace with runner-specific settings.
+
+        Called after generic workspace setup (dirs, symlinks, inputs).
+        Each runner writes its own config files, hooks, and permissions.
+
+        Args:
+            workspace: Root workspace (batch) or case workspace (case mode).
+            config: EvalConfig instance.
+            project_root: Project root directory (where eval.yaml lives).
+            interceptor_src: Path to tool interceptor script (tools.py).
+        """
+
+    @abstractmethod
+    def execute(
+        self,
+        target: Optional[str],
         args: str,
         workspace: Path,
         model: str,
@@ -63,12 +84,15 @@ class EvalRunner(ABC):
         max_budget_usd: float = 5.0,
         timeout_s: int = 600,
         extra_env: Optional[dict] = None,
+        output_dir: Optional[Path] = None,
     ) -> RunResult:
-        """Invoke a skill in an isolated workspace.
+        """Execute a skill or prompt in an isolated workspace.
 
         Args:
-            skill_name: Skill to invoke (e.g. "rfe.review").
-            args: Arguments to pass (e.g. "RHAIRFE-1109").
+            target: Skill name (e.g. "rfe.review") for case/batch mode,
+                or None for prompt mode (direct execution without skill wrapper).
+            args: Skill arguments (e.g. "RHAIRFE-1109") for case/batch mode,
+                or user prompt text for prompt mode.
             workspace: Pre-staged workspace directory.
             model: Model identifier (e.g. "opus", "sonnet").
             settings_path: Path to eval-specific settings file.
@@ -79,7 +103,41 @@ class EvalRunner(ABC):
             timeout_s: Timeout in seconds.
             extra_env: Additional env vars to inject (e.g. from hook outputs).
                 Merged after execution.env, so hook env overrides static config.
+            output_dir: Where to write trace artifacts (e.g. otel_spans.json).
+                Defaults to workspace if not provided.
 
         Returns:
             RunResult with exit code, output, timing, and optional usage stats.
         """
+
+    def run_skill(
+        self,
+        skill_name: str,
+        args: str,
+        workspace: Path,
+        model: str,
+        settings_path: Optional[Path] = None,
+        system_prompt: Optional[str] = None,
+        max_budget_usd: float = 5.0,
+        timeout_s: int = 600,
+    ) -> RunResult:
+        """Deprecated: Use execute() instead.
+
+        This method is provided for backward compatibility with existing code.
+        It calls execute(target=skill_name, ...).
+        """
+        warnings.warn(
+            "run_skill() is deprecated, use execute() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.execute(
+            target=skill_name,
+            args=args,
+            workspace=workspace,
+            model=model,
+            settings_path=settings_path,
+            system_prompt=system_prompt,
+            max_budget_usd=max_budget_usd,
+            timeout_s=timeout_s,
+        )

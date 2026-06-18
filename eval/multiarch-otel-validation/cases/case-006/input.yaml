@@ -1,0 +1,10 @@
+prompt: What are the constraints for creating a ClusterPodPlacementConfig?
+expected_api: ClusterPodPlacementConfig
+expected_example_type: yaml
+expected_fields:
+- apiVersion
+- kind
+- metadata.name
+- spec
+expected_documentation:
+- ai-docs/domain/clusterpodplacementconfig.md

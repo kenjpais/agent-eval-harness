@@ -1,0 +1,7 @@
+prompt: I want to create a ClusterPodPlacementConfig and call it 'multiarch-cluster'.
+  Can you help me configure this?
+expected_rejection: true
+expected_constraint: ClusterPodPlacementConfig name must be exactly 'cluster' (singleton)
+expected_documentation:
+- ai-docs/domain/clusterpodplacementconfig.md
+correct_approach: 'Always use metadata.name: cluster for ClusterPodPlacementConfig'

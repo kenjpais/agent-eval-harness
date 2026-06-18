@@ -1,0 +1,10 @@
+prompt: How do the different execution modes work in the multiarch-tuning-operator?
+expected_files:
+- ai-docs/architecture/components.md
+- AGENTS.md
+expected_mentions:
+- operator mode
+- pod placement controller
+- webhook
+- enoexec event controllers
+- execution flags

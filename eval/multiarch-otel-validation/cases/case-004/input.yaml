@@ -1,0 +1,8 @@
+prompt: I want to run the multiarch-tuning-operator binary with both --enable-operator
+  and --enable-ppc-controllers flags enabled. Is that okay?
+expected_rejection: true
+expected_constraint: Only one execution mode flag per binary instance
+expected_documentation:
+- ai-docs/architecture/components.md
+correct_approach: Run separate binary instances, one per mode with a single execution
+  mode flag

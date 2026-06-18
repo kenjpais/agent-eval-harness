@@ -1,0 +1,10 @@
+prompt: What are the required fields for creating a ClusterPodPlacementConfig?
+expected_files:
+- ai-docs/domain/clusterpodplacementconfig.md
+- AGENTS.md
+expected_mentions:
+- apiVersion
+- kind
+- metadata.name
+- spec
+- cluster

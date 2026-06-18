@@ -77,9 +77,9 @@ class CliRunner(EvalRunner):
     def name(self) -> str:
         return "cli"
 
-    def run_skill(
+    def execute(
         self,
-        skill_name: str,
+        target: Optional[str],
         args: str,
         workspace: Path,
         model: str,
@@ -88,6 +88,7 @@ class CliRunner(EvalRunner):
         max_budget_usd: float = 5.0,
         timeout_s: int = 600,
         extra_env: Optional[dict] = None,
+        output_dir: Optional[Path] = None,
     ) -> RunResult:
         workspace = workspace.resolve()
         output_dir = workspace / "output"
@@ -95,7 +96,7 @@ class CliRunner(EvalRunner):
 
         # Build placeholder values (all paths absolute to avoid cwd issues)
         placeholders = {
-            "agent": skill_name or "",
+            "agent": target or "",  # skill name for case/batch, empty for prompt mode
             "workspace": str(workspace),
             "output_dir": str(output_dir),
             "model": model or "",

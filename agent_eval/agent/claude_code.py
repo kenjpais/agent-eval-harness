@@ -2,12 +2,15 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Optional
+
+import yaml
 
 from .base import EvalRunner, RunResult
 from .stream_capture import (
@@ -43,7 +46,7 @@ class ClaudeCodeRunner(EvalRunner):
         resolved_plugin_dirs = [
             str(Path(d).resolve()) for d in plugin_dirs]
         return cls(
-            permissions=config.permissions,
+            permissions=overrides.get("permissions", config.permissions),
             plugin_dirs=resolved_plugin_dirs,
             env=config.runner.env,
             system_prompt=config.runner.system_prompt,
@@ -52,6 +55,7 @@ class ClaudeCodeRunner(EvalRunner):
             mlflow_tracking_uri=overrides.get("mlflow_tracking_uri"),
             effort=overrides.get("effort", config.runner.effort),
             log_prefix=log_prefix,
+            otel_config=config.runner.otel,
         )
 
     def __init__(
@@ -65,6 +69,7 @@ class ClaudeCodeRunner(EvalRunner):
         mlflow_tracking_uri: Optional[str] = None,
         log_prefix: Optional[str] = None,
         effort: Optional[str] = None,
+        otel_config=None,
     ):
         self._permissions = permissions or {}
         self._subagent_model = subagent_model
@@ -79,6 +84,7 @@ class ClaudeCodeRunner(EvalRunner):
                 f"Invalid effort '{effort}'. "
                 f"Must be one of: {sorted(self._VALID_EFFORTS)}")
         self._effort = effort
+        self._otel_config = otel_config
 
     @property
     def name(self) -> str:
@@ -94,9 +100,43 @@ class ClaudeCodeRunner(EvalRunner):
         except Exception:
             return ""
 
-    def run_skill(
+    def execute(
         self,
-        skill_name: str,
+        target: Optional[str],
+        args: str,
+        workspace: Path,
+        model: str,
+        settings_path: Optional[Path] = None,
+        system_prompt: Optional[str] = None,
+        max_budget_usd: float = 5.0,
+        timeout_s: int = 600,
+        extra_env: Optional[dict] = None,
+        output_dir: Optional[Path] = None,
+    ) -> RunResult:
+        receiver = None
+        if self._otel_config and self._otel_config.enabled:
+            from agent_eval.otel.receiver import OTLPReceiver
+            otel_output = output_dir or workspace
+            receiver = OTLPReceiver(output_dir=otel_output)
+            self._otel_port = receiver.start()
+        else:
+            self._otel_port = None
+
+        try:
+            return self._run_skill_inner(
+                target, args, workspace, model,
+                settings_path, system_prompt,
+                max_budget_usd, timeout_s,
+                extra_env=extra_env,
+            )
+        finally:
+            if receiver:
+                receiver.stop(flush_timeout_s=5)
+                self._otel_port = None
+
+    def _run_skill_inner(
+        self,
+        target: Optional[str],
         args: str,
         workspace: Path,
         model: str,
@@ -125,24 +165,114 @@ class ClaudeCodeRunner(EvalRunner):
         for plugin_dir in self._plugin_dirs:
             cmd.extend(["--plugin-dir", str(plugin_dir)])
 
-        if settings_path:
-            cmd.extend(["--settings", str(settings_path)])
-
         effective_prompt = system_prompt or self._system_prompt
         if effective_prompt:
             cmd.extend(["--append-system-prompt", effective_prompt])
 
-        # Permissions: allow/deny tool patterns
+        # Permissions: handle both simple and path-based formats
+        # If path-based (list of dicts), create a temporary settings file
         deny = self._permissions.get("deny", [])
-        if deny:
-            cmd.extend(["--disallowed-tools", ",".join(deny)])
         allow = self._permissions.get("allow", [])
-        if allow:
-            cmd.extend(["--allowed-tools", ",".join(allow)])
 
-        # Build the skill invocation prompt (passed via stdin)
-        if skill_name:
-            prompt = f"/{skill_name}"
+        temp_settings_file = None
+        # Check if ANY element is path-based (dict), not just the first
+        has_path_based = (
+            any(isinstance(item, dict) for item in deny) if deny else False
+        ) or (
+            any(isinstance(item, dict) for item in allow) if allow else False
+        )
+
+        if has_path_based:
+            # Generate temporary settings file with path-based permissions.
+            # Write to the same directory as settings_path (case workspace) to avoid
+            # modifying the repo when workspace is the repo root (in-repo mode).
+            if settings_path and Path(settings_path).exists():
+                # Write next to settings file in case workspace (case_ws/.claude/)
+                temp_settings_file = Path(settings_path).parent / ".eval-permissions.json"
+            else:
+                # No settings file - use workspace (safe when workspace != repo root)
+                temp_settings_file = workspace / ".eval-permissions.json"
+            settings_config = {}
+
+            # If there's an existing settings file, load it first
+            if settings_path and Path(settings_path).exists():
+                try:
+                    with open(settings_path) as f:
+                        settings_config = json.load(f)
+                except Exception:
+                    settings_config = {}
+
+            # Ensure permissions section exists
+            if "permissions" not in settings_config:
+                settings_config["permissions"] = {}
+
+            # Convert path-based deny rules to Claude Code permission patterns
+            # Format: "Tool(path/pattern*)"
+            # Handle mixed lists: ["Read", {"path": "eval/", "tools": ["Grep"]}]
+            if deny:
+                # Start with existing deny rules (preserve repo-protection rules from workspace settings)
+                deny_patterns = settings_config["permissions"].get("deny", []).copy() if isinstance(settings_config["permissions"].get("deny"), list) else []
+                for rule in deny:
+                    if isinstance(rule, dict):
+                        # Path-based rule
+                        path_pattern = rule.get("path", "")
+                        tools = rule.get("tools", [])
+                        for tool in tools:
+                            # Convert path pattern to Claude Code format
+                            # "eval/" → "Tool(eval/*)"
+                            # "eval.yaml" → "Tool(eval.yaml)"
+                            if path_pattern.endswith("/"):
+                                pattern = f"{tool}({path_pattern}*)"
+                            else:
+                                pattern = f"{tool}({path_pattern})"
+                            deny_patterns.append(pattern)
+                    else:
+                        # Simple string rule - tool name only
+                        deny_patterns.append(rule)
+                settings_config["permissions"]["deny"] = deny_patterns
+
+            # Convert path-based allow rules similarly
+            # Handle mixed lists: ["Read", {"path": "docs/", "tools": ["Grep"]}]
+            if allow:
+                # Start with existing allow rules (preserve case-workspace permissions from workspace settings)
+                allow_patterns = settings_config["permissions"].get("allow", []).copy() if isinstance(settings_config["permissions"].get("allow"), list) else []
+                for rule in allow:
+                    if isinstance(rule, dict):
+                        # Path-based rule
+                        path_pattern = rule.get("path", "")
+                        tools = rule.get("tools", [])
+                        for tool in tools:
+                            if path_pattern.endswith("/"):
+                                pattern = f"{tool}({path_pattern}*)"
+                            else:
+                                pattern = f"{tool}({path_pattern})"
+                            allow_patterns.append(pattern)
+                    else:
+                        # Simple string rule - tool name only
+                        allow_patterns.append(rule)
+                settings_config["permissions"]["allow"] = allow_patterns
+
+            # Write temporary settings file
+            temp_settings_file.write_text(json.dumps(settings_config, indent=2))
+
+            # Override with temporary settings file to ensure path-based rules apply
+            settings_path = temp_settings_file
+        else:
+            # Simple format - use CLI flags directly
+            if deny:
+                cmd.extend(["--disallowed-tools", ",".join(deny)])
+            if allow:
+                cmd.extend(["--allowed-tools", ",".join(allow)])
+
+        # Add --settings flag after all permission mutations
+        if settings_path:
+            cmd.extend(["--settings", str(settings_path)])
+
+        # Build the prompt (passed via stdin)
+        # For case/batch mode: /{skill} {args}
+        # For prompt mode: {args} (direct prompt, no skill wrapper)
+        if target:
+            prompt = f"/{target}"
             if args:
                 prompt += f" {args}"
         else:
@@ -152,6 +282,9 @@ class ClaudeCodeRunner(EvalRunner):
         stdout_lines = []
         deadline = start + timeout_s
         timed_out = False
+
+        # Track temp settings file for cleanup
+        cleanup_settings = temp_settings_file if has_path_based and temp_settings_file else None
 
         try:
             proc = subprocess.Popen(
@@ -241,6 +374,14 @@ class ClaudeCodeRunner(EvalRunner):
             if denial_list:
                 timeout_stderr += (f"\nWARNING: {len(denial_list)} permission "
                                    f"denial(s) detected during execution")
+
+            # Clean up temporary settings file if created
+            if cleanup_settings and cleanup_settings.exists():
+                try:
+                    cleanup_settings.unlink()
+                except Exception:
+                    pass  # Best effort cleanup
+
             return RunResult(
                 exit_code=-1,
                 stdout="\n".join(stdout_lines),
@@ -257,6 +398,14 @@ class ClaudeCodeRunner(EvalRunner):
             )
         except Exception as e:
             duration = time.monotonic() - start
+
+            # Clean up temporary settings file if created
+            if cleanup_settings and cleanup_settings.exists():
+                try:
+                    cleanup_settings.unlink()
+                except Exception:
+                    pass  # Best effort cleanup
+
             return RunResult(
                 exit_code=-1, stdout="", stderr=str(e), duration_s=duration,
             )
@@ -298,6 +447,13 @@ class ClaudeCodeRunner(EvalRunner):
                           f"denial(s) detected during execution")
             stderr = (stderr or "") + denial_msg
 
+        # Clean up temporary settings file if created
+        if cleanup_settings and cleanup_settings.exists():
+            try:
+                cleanup_settings.unlink()
+            except Exception:
+                pass  # Best effort cleanup
+
         return RunResult(
             exit_code=proc.returncode,
             stdout=stdout_text,
@@ -329,7 +485,6 @@ class ClaudeCodeRunner(EvalRunner):
         if session_dir.exists() and session_dir.is_dir():
             shutil.rmtree(session_dir, ignore_errors=True)
 
-    # Environment keys safe to forward to evaluated skills
     _SAFE_ENV_KEYS = {
         "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TERM",
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
@@ -342,6 +497,14 @@ class ClaudeCodeRunner(EvalRunner):
         "CLOUDSDK_CONFIG", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
         "MLFLOW_TRACKING_URI", "MLFLOW_EXPERIMENT_NAME",
         "AGENT_EVAL_RUNS_DIR",
+        # OTel
+        "OTEL_TRACES_EXPORTER", "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_RESOURCE_ATTRIBUTES", "OTEL_SERVICE_NAME",
+        "OTEL_LOG_TOOL_CONTENT", "OTEL_LOG_USER_PROMPTS",
+        "OTEL_LOG_TOOL_DETAILS", "OTEL_LOG_RAW_API_BODIES",
+        "CLAUDE_CODE_ENABLE_TELEMETRY",
+        "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
     }
 
     def _build_env(self, extra_env=None):
@@ -365,7 +528,233 @@ class ClaudeCodeRunner(EvalRunner):
             env["MLFLOW_EXPERIMENT_NAME"] = self._mlflow_experiment
         if self._mlflow_tracking_uri:
             env["MLFLOW_TRACKING_URI"] = self._mlflow_tracking_uri
+        if self._otel_port:
+            self._inject_otel_env(env)
         return env
+
+    def _inject_otel_env(self, env: dict) -> None:
+        """Set OTel env vars for the agent subprocess."""
+        cfg = self._otel_config
+        env["OTEL_TRACES_EXPORTER"] = "otlp"
+        env["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"http://127.0.0.1:{self._otel_port}"
+        env["OTEL_EXPORTER_OTLP_PROTOCOL"] = cfg.protocol
+        env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
+        env["CLAUDE_CODE_ENHANCED_TELEMETRY_BETA"] = "1"
+        env["OTEL_LOG_USER_PROMPTS"] = "1"
+        env["OTEL_LOG_TOOL_DETAILS"] = "1"
+        if cfg.content:
+            env["OTEL_LOG_TOOL_CONTENT"] = "1"
+        if cfg.resource_attributes:
+            attrs = ",".join(f"{k}={v}" for k, v in cfg.resource_attributes.items())
+            env["OTEL_RESOURCE_ATTRIBUTES"] = attrs
+
+    # ── Workspace setup ─────────────────────────────────────────
+
+    def setup_workspace(self, workspace, config, *, project_root=None,
+                        interceptor_src=None):
+        if config.inputs.tools:
+            self._ws_setup_tool_hooks(workspace, config, project_root,
+                                      interceptor_src)
+        else:
+            self._ws_setup_subagent_only(workspace, config, project_root)
+
+    def _ws_setup_subagent_only(self, workspace, config, project_root):
+        """Minimal .claude/settings.json with SubagentStop hook."""
+        settings_dir = workspace / ".claude"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+
+        settings = {}
+        self._ws_carry_over_permissions(settings, project_root)
+        self._ws_merge_harness_permissions(settings, config)
+
+        if project_root:
+            settings.setdefault("permissions", {}).setdefault(
+                "additionalDirectories", []).append(
+                    str(project_root.resolve()))
+
+        from agent_eval.agent.stream_capture import setup_subagent_hook
+        subagent_dir = str((workspace / "subagents").resolve())
+        setup_subagent_hook(settings, subagent_dir)
+
+        self._ws_inject_env(settings, config)
+        self._ws_apply_runner_settings(settings, config)
+
+        with open(settings_dir / "settings.json", "w") as f:
+            json.dump(settings, f, indent=2)
+
+        print("HOOKS: SubagentStop configured (subagent capture)")
+
+    def _ws_setup_tool_hooks(self, workspace, config, project_root,
+                              interceptor_src):
+        """Generate settings.json with PreToolUse hooks + tool_handlers.yaml."""
+        handlers = []
+        hook_matchers = set()
+        for tool_cfg in config.inputs.tools:
+            handler = {"match": tool_cfg.match}
+            patterns = self._ws_extract_tool_patterns(tool_cfg.match)
+            handler["patterns"] = patterns
+            if tool_cfg.prompt:
+                handler["prompt"] = tool_cfg.prompt
+            if tool_cfg.prompt_file:
+                handler["prompt_file"] = tool_cfg.prompt_file
+            handlers.append(handler)
+            hook_matchers.update(patterns)
+
+        handler_data = {"handlers": handlers}
+        if config.models.hook:
+            handler_data["hook_model"] = config.models.hook
+        with open(workspace / "tool_handlers.yaml", "w") as f:
+            yaml.dump(handler_data, f, default_flow_style=False)
+
+        hooks_dir = workspace / "hooks"
+        hooks_dir.mkdir(exist_ok=True)
+        if interceptor_src and interceptor_src.exists():
+            shutil.copy2(interceptor_src, hooks_dir / "tools.py")
+
+        settings_dir = workspace / ".claude"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+
+        settings = {"hooks": {"PreToolUse": []}}
+        for matcher in sorted(hook_matchers):
+            settings["hooks"]["PreToolUse"].append({
+                "matcher": matcher,
+                "hooks": [{
+                    "type": "command",
+                    "command": f"python3 {workspace}/hooks/tools.py",
+                }],
+            })
+
+        self._ws_carry_over_permissions(settings, project_root)
+        self._ws_merge_harness_permissions(settings, config)
+
+        if project_root:
+            settings.setdefault("permissions", {}).setdefault(
+                "additionalDirectories", []).append(
+                    str(project_root.resolve()))
+
+        from agent_eval.agent.stream_capture import setup_subagent_hook
+        subagent_dir = str((workspace / "subagents").resolve())
+        setup_subagent_hook(settings, subagent_dir)
+
+        self._ws_inject_env(settings, config)
+        self._ws_apply_runner_settings(settings, config)
+
+        with open(settings_dir / "settings.json", "w") as f:
+            json.dump(settings, f, indent=2)
+
+        print(f"HOOKS: {len(hook_matchers)} tool interceptors configured")
+
+    @staticmethod
+    def _ws_carry_over_permissions(settings, project_root):
+        """Copy project .claude/settings.json permissions into workspace settings."""
+        if not project_root:
+            return
+        project_settings = project_root / ".claude" / "settings.json"
+        if not project_settings.exists():
+            return
+        try:
+            with open(project_settings) as f:
+                proj = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+
+        proj_perms = proj.get("permissions", {})
+        if proj_perms.get("allow"):
+            allow_list = _expand_symlink_permissions(list(proj_perms["allow"]))
+            settings.setdefault("permissions", {})["allow"] = allow_list
+        if proj_perms.get("deny"):
+            settings.setdefault("permissions", {})["deny"] = list(
+                proj_perms["deny"])
+        if proj_perms.get("additionalDirectories"):
+            dirs = list(proj_perms["additionalDirectories"])
+            for d in list(dirs):
+                resolved = str(Path(d).resolve())
+                if resolved != d and resolved not in dirs:
+                    dirs.append(resolved)
+            settings.setdefault("permissions", {}).setdefault(
+                "additionalDirectories", []).extend(dirs)
+
+    @staticmethod
+    def _ws_merge_harness_permissions(settings, config):
+        """Merge eval.yaml permissions.allow into settings."""
+        allow = (config.permissions or {}).get("allow") if hasattr(
+            config, "permissions") else None
+        if not allow:
+            return
+        harness_allow = _expand_symlink_permissions(list(allow))
+        existing = settings.setdefault("permissions", {}).setdefault(
+            "allow", [])
+        for pattern in harness_allow:
+            if pattern not in existing:
+                existing.append(pattern)
+
+    @staticmethod
+    def _ws_inject_env(settings, config):
+        """Inject execution.env into settings.json env block."""
+        if not config.execution.env:
+            return
+        env_block = settings.setdefault("env", {})
+        for key, value in config.execution.env.items():
+            if isinstance(value, str) and value.startswith("$"):
+                resolved = os.environ.get(value[1:])
+                if resolved is not None:
+                    env_block[key] = resolved
+            else:
+                env_block[key] = str(value)
+
+    @staticmethod
+    def _ws_apply_runner_settings(settings, config):
+        """Merge eval.yaml runner.settings into workspace settings."""
+        user_settings = getattr(config.runner, "settings", None) or {}
+        if user_settings:
+            _deep_merge(settings, user_settings)
+
+    @staticmethod
+    def _ws_extract_tool_patterns(match_text):
+        """Extract tool name patterns from a natural language match description."""
+        patterns = []
+        known_tools = ["AskUserQuestion", "Bash", "Read", "Write", "Edit",
+                       "Glob", "Grep", "Agent", "Skill"]
+        for tool in known_tools:
+            if tool.lower() in match_text.lower():
+                patterns.append(tool)
+        for m in re.finditer(r'(mcp__\w+(?:__\w+)*(?:\*)?)', match_text):
+            patterns.append(m.group(1))
+        if not patterns and ("script" in match_text.lower()
+                             or "api" in match_text.lower()):
+            patterns.append("Bash")
+        return patterns or ["*"]
+
+
+def _expand_symlink_permissions(allow_list):
+    """Add resolved-path variants for permission patterns with symlinked dirs."""
+    extras = []
+    for pattern in allow_list:
+        m = re.match(r'(Write|Edit|Bash)\((.+)\)', pattern)
+        if not m:
+            continue
+        tool, glob_path = m.groups()
+        prefix = re.split(r'[*?]', glob_path, maxsplit=1)[0].rstrip('/')
+        if not prefix or not prefix.startswith('/'):
+            continue
+        resolved = str(Path(prefix).resolve())
+        if resolved != prefix:
+            resolved_pattern = f"{tool}({glob_path.replace(prefix, resolved)})"
+            if resolved_pattern not in allow_list:
+                extras.append(resolved_pattern)
+    return allow_list + extras
+
+
+def _deep_merge(dst, src):
+    """Recursively merge src into dst. Lists are extended, dicts merged."""
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _deep_merge(dst[k], v)
+        elif isinstance(v, list) and isinstance(dst.get(k), list):
+            dst[k].extend(v)
+        else:
+            dst[k] = v
+    return dst
 
 
 def _extract_denial_list(result_obj, streaming_count):

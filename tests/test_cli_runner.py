@@ -25,6 +25,8 @@ class TestCliRunnerConfig:
         cfg = EvalConfig.from_yaml(self._write(tmp_path, """
 name: t
 skill: s
+execution:
+  skill: s
 runner:
   type: cli
   command: "my-runner run {agent} --workspace {workspace}"
@@ -36,6 +38,8 @@ runner:
         cfg = EvalConfig.from_yaml(self._write(tmp_path, """
 name: t
 skill: s
+execution:
+  skill: s
 runner:
   type: cli
   command:
@@ -53,6 +57,8 @@ runner:
         cfg = EvalConfig.from_yaml(self._write(tmp_path, """
 name: t
 skill: s
+execution:
+  skill: s
 runner:
   type: claude-code
 """))

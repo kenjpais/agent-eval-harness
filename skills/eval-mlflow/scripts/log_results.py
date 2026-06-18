@@ -38,6 +38,29 @@ from agent_eval.mlflow.experiment import resolve_tracking_uri
 from agent_eval.mlflow.trace_builder import build_trace, log_trace
 
 
+def _push_otel_spans(otel_path, tracking_uri, experiment_id, run_id=None):
+    """POST otel_spans.json directly to MLflow's OTLP/HTTP endpoint.
+
+    otel_spans.json is written by OTLPReceiver.stop() as {"resourceSpans": [...]},
+    which is a valid ExportTraceServiceRequest JSON body. MLflow 3.x handles
+    hex->base64 ID conversion internally. Two headers required; no transformation.
+    """
+    import requests
+    headers = {
+        "Content-Type": "application/json",
+        "x-mlflow-experiment-id": experiment_id,
+    }
+    if run_id:
+        headers["x-mlflow-run-id"] = run_id
+    resp = requests.post(
+        f"{tracking_uri.rstrip('/')}/v1/traces",
+        json=json.loads(otel_path.read_text()),
+        headers=headers,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp
+
 
 # ── Main ─────────────────────────────────────────────────────────────
 
@@ -51,8 +74,7 @@ def main():
     config = EvalConfig.from_yaml(args.config)
     mlflow.set_tracking_uri(resolve_tracking_uri(config))
     runs_base = Path(os.environ.get("AGENT_EVAL_RUNS_DIR", "eval/runs"))
-    eval_subdir = config.skill or config.name
-    runs_dir = runs_base / eval_subdir if eval_subdir else runs_base
+    runs_dir = runs_base / config.eval_name()
     run_dir = runs_dir / args.run_id
 
     # Load summary
@@ -229,7 +251,7 @@ def main():
     # Build synthetic traces from stdout.log for cases not already covered
     # by existing execution traces.
     exec_mode = run_result.get("execution_mode", "batch")
-    if exec_mode == "case":
+    if exec_mode in ("case", "prompt"):
         cases_dir = run_dir / "cases"
         if cases_dir.exists():
             for case_dir in sorted(d for d in cases_dir.iterdir() if d.is_dir()):
@@ -241,15 +263,27 @@ def main():
                     continue
                 case_result = run_result.get("per_case", {}).get(case_id, run_result)
                 trace_name = f"{config.skill} ({case_id})" if config.skill else case_id
-                trace_dict = build_trace(case_stdout, case_result, case_id,
-                                         experiment_id, trace_name=trace_name)
-                if trace_dict:
-                    tid = log_trace(trace_dict)
-                    if tid:
-                        case_trace_map[case_id] = tid
-                        trace_ids.append(tid)
-                        num_spans = len(trace_dict["data"]["spans"])
-                        print(f"TRACE: {tid} ({num_spans} spans) — {case_id}")
+                otel_path = case_dir / "otel_spans.json"
+                if otel_path.exists():
+                    # OTel-native path: accurate timing, real hierarchy, per-turn tokens
+                    try:
+                        _push_otel_spans(otel_path, resolve_tracking_uri(config),
+                                         experiment_id, run_id=mlflow_run_id)
+                        print(f"TRACE (otel): {case_id}")
+                    except Exception as e:
+                        print(f"WARNING: OTel push failed for {case_id}: {e}",
+                              file=sys.stderr)
+                else:
+                    # Fallback: stream-json reconstruction (pre-OTel runs)
+                    trace_dict = build_trace(case_stdout, case_result, case_id,
+                                             experiment_id, trace_name=trace_name)
+                    if trace_dict:
+                        tid = log_trace(trace_dict)
+                        if tid:
+                            case_trace_map[case_id] = tid
+                            trace_ids.append(tid)
+                            num_spans = len(trace_dict["data"]["spans"])
+                            print(f"TRACE: {tid} ({num_spans} spans) — {case_id}")
     else:
         stdout_path = run_dir / "stdout.log"
         if stdout_path.exists() and run_result:
