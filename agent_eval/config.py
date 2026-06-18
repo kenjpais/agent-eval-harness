@@ -206,11 +206,31 @@ class ExecutionConfig:
                 "Use skill for '/skill-name' invocations or prompt for direct prompts."
             )
 
-        if not has_skill and not has_prompt:
-            raise ValueError(
-                "execution requires either 'skill' or 'prompt'. "
-                "Use skill for '/skill-name' invocations or prompt for direct prompts."
-            )
+        # Note: both empty is allowed at config-load time to support programmatic
+        # EvalConfig construction and test fixtures. execute.py validates at run time.
+
+
+@dataclass
+class OTelConfig:
+    """OpenTelemetry trace capture configuration.
+
+    When enabled, the harness starts a local OTLP receiver per case,
+    configures the agent subprocess to export spans to it, and uses
+    the collected spans (via a per-runtime SpanMapper) to generate
+    events.json for judges.
+
+    enabled: start the local OTLP receiver and inject OTel env vars.
+    content: log full tool input/output content in spans.
+    api_bodies: log raw API request/response bodies to files
+        (required for Claude Code to capture assistant text).
+    resource_attributes: extra key=value pairs for OTEL_RESOURCE_ATTRIBUTES.
+    protocol: OTLP wire protocol (http/json or http/protobuf).
+    """
+    enabled: bool = False
+    content: bool = True
+    api_bodies: bool = True
+    resource_attributes: dict = field(default_factory=dict)
+    protocol: str = "http/json"
 
 
 @dataclass
@@ -236,6 +256,7 @@ class RunnerConfig:
     env: dict = field(default_factory=dict)
     system_prompt: Optional[str] = None
     effort: Optional[str] = None  # Claude Code: low | medium | high | xhigh | max
+    otel: OTelConfig = field(default_factory=OTelConfig)
 
 
 @dataclass
@@ -506,6 +527,14 @@ class EvalConfig:
             raise ValueError(
                 f"runner.workspace_mode must be None or 'repo', got: {workspace_mode!r}")
 
+        otel_raw = runner_raw.get("otel") or {}
+        otel = OTelConfig(
+            enabled=otel_raw.get("enabled", False),
+            content=otel_raw.get("content", True),
+            api_bodies=otel_raw.get("api_bodies", True),
+            resource_attributes=otel_raw.get("resource_attributes") or {},
+            protocol=otel_raw.get("protocol", "http/json"),
+        )
         runner = RunnerConfig(
             type=runner_raw.get("type", "claude-code"),
             command=command,
@@ -515,6 +544,7 @@ class EvalConfig:
             env=runner_raw.get("env", {}) or {},
             system_prompt=runner_raw.get("system_prompt"),
             effort=runner_raw.get("effort"),
+            otel=otel,
         )
 
         # Models block
