@@ -402,6 +402,12 @@ def _read_case_input(dataset_path: str, case_id: str) -> str:
     """Read the input file from a dataset case directory."""
     case_dir = Path(dataset_path) / case_id
     if not case_dir.exists():
+        ds = Path(dataset_path)
+        if ds.is_dir():
+            matches = [d for d in ds.iterdir() if d.is_dir() and d.name.startswith(case_id)]
+            if len(matches) == 1:
+                case_dir = matches[0]
+    if not case_dir.exists():
         return ""
     for suffix in (".yaml", ".yml", ".json"):
         candidate = case_dir / f"input{suffix}"
@@ -1297,8 +1303,11 @@ def _render_scoring_summary(summary, config, baseline_summary=None):
                 status_cls = "pass" if ok else "fail"
                 status_label = "PASS" if ok else "FAIL"
 
-        jtype, jmodel = judge_info.get(judge_name, ("—", "—"))
-        if jtype in ("check", "code", "builtin") and jmodel == "—":
+        jtype, jmodel = judge_info.get(judge_name, (None, "—"))
+        if jtype is None:
+            first_case = next(iter(summary.get("per_case", {}).values()), {})
+            jtype = (first_case.get(judge_name) or {}).get("judge_type", "—")
+        if jtype in ("check", "code", "builtin", "step") and jmodel == "—":
             type_label = jtype
         else:
             type_label = f'{jtype} ({jmodel.split("@")[0]})'

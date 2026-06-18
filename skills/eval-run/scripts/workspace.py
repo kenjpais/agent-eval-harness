@@ -614,5 +614,143 @@ def _runner_setup(workspace, config):
     )
 
 
+def _merge_harness_permissions(settings, config):
+    """Merge eval.yaml permissions.allow into settings so named subagents
+    (which may not inherit --allowed-tools) receive the harness patterns."""
+    allow = (
+        (config.permissions or {}).get("allow")
+        if hasattr(config, "permissions")
+        else None
+    )
+    if not allow:
+        return
+    harness_allow = _expand_symlink_permissions(list(allow))
+    existing = settings.setdefault("permissions", {}).setdefault("allow", [])
+    for pattern in harness_allow:
+        if pattern not in existing:
+            existing.append(pattern)
+
+
+def _deep_merge(dst, src):
+    """Recursively merge src into dst. Lists are extended, dicts merged."""
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _deep_merge(dst[k], v)
+        elif isinstance(v, list) and isinstance(dst.get(k), list):
+            dst[k].extend(v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def _apply_runner_settings(settings, config):
+    """Merge eval.yaml `runner.settings` into the workspace settings dict.
+
+    Lets users add Claude Code settings (model defaults, env, MCP servers,
+    etc.) to a runner without forking the harness. Merged after harness
+    defaults so user overrides win for scalar keys; lists are extended.
+    """
+    user_settings = getattr(config.runner, "settings", None) or {}
+    if user_settings:
+        _deep_merge(settings, user_settings)
+
+
+def _setup_subagent_only_hook(workspace, config):
+    """Set up SubagentStop hook without tool interception.
+
+    When there are no inputs.tools, we still need the SubagentStop hook
+    to capture background agent transcripts for tracing. This creates
+    a minimal .claude/settings.json with just the hook and project
+    permissions.
+    """
+    import json as _json
+
+    settings_dir = workspace / ".claude"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+
+    settings = {}
+
+    # Carry over project permissions (allow, deny, additionalDirectories)
+    _carry_over_permissions(settings)
+    _merge_harness_permissions(settings, config)
+
+    # Grant project root access
+    project_root = str(Path.cwd().resolve())
+    settings.setdefault("permissions", {}).setdefault(
+        "additionalDirectories", []
+    ).append(project_root)
+
+    # Add SubagentStop hook
+    from agent_eval.agent.stream_capture import setup_subagent_hook
+
+    subagent_dir = str((workspace / "subagents").resolve())
+    setup_subagent_hook(settings, subagent_dir)
+
+    # Inject execution.env into settings
+    _inject_env(settings, config)
+
+    # Apply user-provided runner.settings last so they can override defaults
+    _apply_runner_settings(settings, config)
+
+    with open(settings_dir / "settings.json", "w") as f:
+        _json.dump(settings, f, indent=2)
+
+    print("HOOKS: SubagentStop configured (subagent capture)")
+
+
+def _setup_tool_hooks(workspace, config):
+    """Generate settings.json and tool_handlers.yaml for tool interception.
+
+    Delegates the core interception artifacts (handlers, hooks, interceptor
+    script) to :func:`agent_eval.tools.interception.generate_interception`,
+    then layers workspace-specific settings on top (project permissions,
+    subagent capture, execution env, runner settings).
+    """
+    import json as _json
+    from agent_eval.tools.interception import generate_interception
+
+    hooks_command = f"python3 '{workspace}/hooks/tools.py'"
+    resolved = config.config_dir / "tool_handlers.yaml" if config.config_dir else None
+    hook_matchers = generate_interception(
+        workspace, config, hooks_command,
+        resolved_handlers_path=resolved if resolved and resolved.is_file() else None)
+
+    # The shared module wrote .claude/settings.json with hooks + eval.yaml
+    # permissions + execution.env. Now layer workspace-specific settings.
+    settings_path = workspace / ".claude" / "settings.json"
+    settings = {}
+    if settings_path.exists():
+        try:
+            settings = _json.loads(settings_path.read_text())
+        except (_json.JSONDecodeError, OSError):
+            pass
+
+    # Carry over project permissions (allow, deny, additionalDirectories)
+    _carry_over_permissions(settings)
+    _merge_harness_permissions(settings, config)
+
+    # Grant access to the project root so symlinked resources can be read.
+    project_root = str(Path.cwd().resolve())
+    settings.setdefault("permissions", {}).setdefault(
+        "additionalDirectories", []
+    ).append(project_root)
+
+    # Add SubagentStop hook to capture background agent transcripts.
+    from agent_eval.agent.stream_capture import setup_subagent_hook
+    subagent_dir = str((workspace / "subagents").resolve())
+    setup_subagent_hook(settings, subagent_dir)
+
+    # Inject execution.env into settings
+    _inject_env(settings, config)
+
+    # Apply user-provided runner.settings last so they can override defaults
+    _apply_runner_settings(settings, config)
+
+    with open(settings_path, "w") as f:
+        _json.dump(settings, f, indent=2)
+
+    print(f"HOOKS: {len(hook_matchers)} tool interceptors configured")
+
+
 if __name__ == "__main__":
     main()
