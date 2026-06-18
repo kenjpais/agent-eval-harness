@@ -8,7 +8,7 @@ import pytest
 # Ensure agent_eval is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agent_eval.config import DatasetConfig, EvalConfig, JudgeConfig, ModelsConfig
+from agent_eval.config import DatasetConfig, EvalConfig, ExecutionConfig, JudgeConfig, ModelsConfig, OTelConfig
 from score import _resolve_judge_model
 
 
@@ -277,3 +277,97 @@ hooks:
     - command: "echo setup"
 """))
     assert len(w) == 0
+
+
+# ── OTelConfig parsing ────────────────────────────────────────────────────
+
+def test_otel_defaults_when_block_absent(tmp_path):
+    """No runner.otel block → OTelConfig with enabled=False."""
+    cfg = EvalConfig.from_yaml(_write(tmp_path, "name: t\nskill: s\n"))
+    assert isinstance(cfg.runner.otel, OTelConfig)
+    assert cfg.runner.otel.enabled is False
+    assert cfg.runner.otel.content is True      # default: content logging on
+    assert cfg.runner.otel.api_bodies is True
+
+
+def test_otel_enabled_parses(tmp_path):
+    """runner.otel.enabled: true is parsed correctly."""
+    cfg = EvalConfig.from_yaml(_write(tmp_path, """
+name: t
+skill: s
+runner:
+  type: claude-code
+  otel:
+    enabled: true
+"""))
+    assert cfg.runner.otel.enabled is True
+    assert cfg.runner.otel.content is True       # default retained
+    assert cfg.runner.otel.api_bodies is True    # default retained
+
+
+def test_otel_full_block_parses(tmp_path):
+    """All runner.otel fields parse correctly."""
+    cfg = EvalConfig.from_yaml(_write(tmp_path, """
+name: t
+skill: s
+runner:
+  type: claude-code
+  otel:
+    enabled: true
+    content: false
+    api_bodies: false
+    protocol: http/protobuf
+    resource_attributes:
+      env: staging
+      version: "1.2.3"
+"""))
+    otel = cfg.runner.otel
+    assert otel.enabled is True
+    assert otel.content is False
+    assert otel.api_bodies is False
+    assert otel.protocol == "http/protobuf"
+    assert otel.resource_attributes == {"env": "staging", "version": "1.2.3"}
+
+
+def test_otel_null_block_treated_as_defaults(tmp_path):
+    """runner.otel: null → same as no otel block."""
+    cfg = EvalConfig.from_yaml(_write(tmp_path, """
+name: t
+skill: s
+runner:
+  otel: ~
+"""))
+    assert cfg.runner.otel.enabled is False
+
+
+# ── ExecutionConfig validation ────────────────────────────────────────────
+
+def test_execution_both_empty_allowed():
+    """Both skill and prompt empty is permitted at config-load time."""
+    ec = ExecutionConfig()
+    assert ec.skill == ""
+    assert ec.prompt == ""
+
+
+def test_execution_skill_only_valid():
+    """Only skill set is valid."""
+    ec = ExecutionConfig(skill="my-skill")
+    assert ec.skill == "my-skill"
+
+
+def test_execution_prompt_only_valid():
+    """Only prompt set is valid."""
+    ec = ExecutionConfig(prompt="Do something useful")
+    assert ec.prompt == "Do something useful"
+
+
+def test_execution_both_set_raises():
+    """Both skill and prompt set raises ValueError (mutually exclusive)."""
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        ExecutionConfig(skill="my-skill", prompt="Do something")
+
+
+def test_execution_invalid_mode_raises():
+    """Invalid mode raises ValueError."""
+    with pytest.raises(ValueError, match="execution.mode"):
+        ExecutionConfig(mode="invalid", skill="s")

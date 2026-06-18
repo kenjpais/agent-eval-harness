@@ -124,7 +124,7 @@ class ClaudeCodeRunner(EvalRunner):
 
         try:
             return self._run_skill_inner(
-                skill_name, args, workspace, model,
+                target, args, workspace, model,
                 settings_path, system_prompt,
                 max_budget_usd, timeout_s,
                 extra_env=extra_env,
@@ -136,7 +136,7 @@ class ClaudeCodeRunner(EvalRunner):
 
     def _run_skill_inner(
         self,
-        skill_name: str,
+        target: Optional[str],
         args: str,
         workspace: Path,
         model: str,

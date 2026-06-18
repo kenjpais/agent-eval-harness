@@ -1,0 +1,12 @@
+prompt: How do I configure a PodPlacementConfig to control pod scheduling in a specific
+  namespace?
+expected_api: PodPlacementConfig
+expected_example_type: yaml
+expected_fields:
+- apiVersion
+- kind
+- metadata.name
+- metadata.namespace
+- spec
+expected_documentation:
+- ai-docs/domain/podplacementconfig.md

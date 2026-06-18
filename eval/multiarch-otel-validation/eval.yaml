@@ -1,0 +1,192 @@
+# OTel + MLflow Integration Validation Eval
+# Tests whether agents can navigate and use the multiarch-tuning-operator ai-docs.
+# Uses prompt mode with taxonomy-based case generation.
+# OTel is enabled to validate span capture and MLflow OTLP push.
+
+name: multiarch-otel-validation
+description: |
+  Validates OTel trace capture and MLflow OTLP push by running a small
+  agentic-docs evaluation against multiarch-tuning-operator ai-docs.
+  Generated cases test doc navigation, constraint enforcement, and CRD usage.
+
+execution:
+  mode: case
+  prompt: |
+    You are an AI coding assistant helping developers work with the
+    Multiarch Tuning Operator repository.
+
+    The repository documentation is located at:
+    /Users/kpais/kpais-workspace/claude-tmp/multiarch-tuning-operator-test-plugin/
+
+    Your task:
+    {{ input.prompt }}
+
+    Read the actual files — starting with AGENTS.md — before answering.
+    Cite specific file paths in your answer.
+  timeout: 300
+  max_budget_usd: 2.0
+
+runner:
+  type: claude-code
+  otel:
+    enabled: true
+    content: false      # Suppress tool content to keep otel_spans.json small
+    api_bodies: true    # Required for span mapper to extract token counts
+  settings:
+    cleanupPeriodMs: 0
+
+models:
+  skill: claude-haiku-4-5
+  judge: claude-haiku-4-5
+
+permissions:
+  allow: []
+  deny:
+    - "mcp__*"
+
+mlflow:
+  experiment: multiarch-otel-validation
+  tracking_uri: http://127.0.0.1:5555
+
+dataset:
+  path: cases
+  schema: |
+    Each case directory contains:
+    - input.yaml: The 'prompt' field is the user question for the agent.
+      May also have: expected_files (list of doc paths), expected_mentions (keywords),
+      expected_constraint (for anti-pattern cases), expected_api (for component-usage cases),
+      expected_components (for architecture cases).
+    - annotations.yaml (optional): category, difficulty, topic.
+
+  test_categories:
+    - name: navigation
+      template: documentation/navigation
+      count: 2
+      description: "Agent navigates ai-docs/ to find answers about CRDs and operator structure"
+
+    - name: anti-pattern
+      template: documentation/anti-pattern
+      count: 2
+      description: "Agent rejects approaches that violate documented constraints (singleton naming, flag exclusivity)"
+
+    - name: component-usage
+      template: documentation/component-usage
+      count: 2
+      description: "Agent explains how to create and configure ClusterPodPlacementConfig and PodPlacementConfig"
+
+  domain:
+    type: kubernetes-operator
+    repository: multiarch-tuning-operator
+    documentation_root: /Users/kpais/kpais-workspace/claude-tmp/multiarch-tuning-operator-test-plugin
+    documentation_structure:
+      entry_point: AGENTS.md
+      areas:
+        - path: ai-docs/domain/
+          topics:
+            - ClusterPodPlacementConfig (cluster-scoped singleton, name must be "cluster")
+            - PodPlacementConfig (namespaced, label-selector based)
+            - ENoExecEvent (records exec format errors from eBPF daemon)
+        - path: ai-docs/architecture/
+          topics:
+            - Four execution modes (operator, ppc-controllers, ppc-webhook, enoexec-event-controllers)
+            - Single binary with mutually exclusive mode flags
+            - Image inspection pipeline (containers/image library, pull secrets, CGO)
+            - Scheduling gate workflow (gate add → image inspect → nodeAffinity → gate remove)
+        - path: ai-docs/references/
+          topics:
+            - Links to platform documentation (openshift/enhancements/ai-docs/)
+
+    constraints:
+      - rule: "ClusterPodPlacementConfig name must be exactly 'cluster' (singleton)"
+        documentation: ai-docs/domain/clusterpodplacementconfig.md
+        wrong_approach: "Naming the CR anything other than 'cluster'"
+        correct_approach: "Always use metadata.name: cluster"
+
+      - rule: "Only one execution mode flag per binary instance"
+        documentation: ai-docs/architecture/components.md
+        wrong_approach: "Setting --enable-operator and --enable-ppc-controllers together"
+        correct_approach: "Run separate binary instances, one per mode"
+
+      - rule: "System namespaces (openshift-*, kube-*, hypershift-*) are excluded automatically"
+        documentation: AGENTS.md
+        wrong_approach: "Adding explicit namespace exclusion rules for system namespaces"
+        correct_approach: "Rely on built-in exclusion; only configure namespaceSelector for app namespaces"
+
+    apis:
+      - name: ClusterPodPlacementConfig
+        documentation: ai-docs/domain/clusterpodplacementconfig.md
+        api_version: multiarch.openshift.io/v1beta1
+        scope: cluster
+        example_type: yaml
+        required_fields: [apiVersion, kind, metadata.name, spec]
+        constraints: [name must be "cluster"]
+
+      - name: PodPlacementConfig
+        documentation: ai-docs/domain/podplacementconfig.md
+        api_version: multiarch.openshift.io/v1beta1
+        scope: namespaced
+        example_type: yaml
+        required_fields: [apiVersion, kind, metadata.name, metadata.namespace, spec]
+
+    components:
+      - Operator mode (--enable-operator): manages ClusterPodPlacementConfig CR lifecycle
+      - Pod Placement Controller (--enable-ppc-controllers): reconciles gated pods, inspects images, sets nodeAffinity
+      - Pod Placement Webhook (--enable-ppc-webhook): adds scheduling gates to new pods
+      - ENoExec Event Controllers (--enable-enoexec-event-controllers): monitors exec format errors via eBPF
+
+outputs: []
+
+traces:
+  stdout: true
+  stderr: true
+  events: false
+  metrics: true
+
+judges:
+  - name: reads_docs
+    description: Agent actually read documentation files (not hallucinated from training data).
+    check: |
+      stdout = outputs.get("stdout", "")
+      # Evidence of actual file reads — tool outputs show path references
+      markers = [
+        "ai-docs/", "AGENTS.md", "components.md",
+        "clusterpodplacementconfig.md", "podplacementconfig.md",
+        "domain/", "architecture/", "multiarch-tuning-operator-test-plugin",
+      ]
+      found = [m for m in markers if m in stdout]
+      if not found:
+          return False, "No evidence of documentation file reads in stdout"
+      return True, f"Doc read evidence found: {found[:3]}"
+
+  - name: answer_quality
+    description: |
+      Score the agent's answer on accuracy and use of actual documentation.
+      5 = fully correct, cites specific docs, addresses all sub-questions.
+      3 = partially correct, missing some details.
+      1 = incorrect or no real documentation access.
+    prompt: |
+      Evaluate this AI agent's response to a documentation question about the
+      Multiarch Tuning Operator. The agent should have read actual files from:
+      /Users/kpais/kpais-workspace/claude-tmp/multiarch-tuning-operator-test-plugin/
+
+      Agent's full output (stdout — includes tool calls, file reads, and response):
+      {{ outputs.stdout[:6000] }}
+
+      Score 1-5 based on:
+      - Did the agent actually read documentation files? (evidence: file path mentions, Read tool calls)
+      - Did the agent answer the question accurately and specifically?
+      - Are claims backed by what was found in docs (not just training knowledge)?
+
+      5 = All aspects correct, clear doc-reading evidence, specific file paths cited
+      4 = Mostly correct, minor omissions or one vague point
+      3 = Partial — some questions answered, some missed
+      2 = Major errors or mostly training-data guessing
+      1 = Incorrect or no doc access evident
+
+      Return JSON only: {"score": <1-5>, "rationale": "<one sentence>"}
+
+thresholds:
+  reads_docs:
+    min_pass_rate: 0.67
+  answer_quality:
+    min_mean: 3.0
